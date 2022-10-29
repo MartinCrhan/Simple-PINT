@@ -1,0 +1,15 @@
+n_dir    5
+nbead    10
+temper   2
+gamma    0
+scale    1
+int_type 1Ddouble
+inp_type fromgrid
+dyn_mode rpmd
+thermo   yay
+constr   nay
+total_t  100
+timestep 0.01
+mass     1
+init_box 10.77
+target   5
