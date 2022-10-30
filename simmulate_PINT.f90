@@ -40,7 +40,15 @@ read(1,*) buffer, target_freq
 
 close(1)
 
-N = n_dir ** 3
+if (inp_type == 'fromgrid') then
+
+    N = n_dir ** 3
+
+elseif (inp_type == 'frominpt') then
+
+    N = n_dir ! there is no reason for it to be a number cubed, or to really create a new variable just for this ...
+
+end if
 
 if (int_type == 'harmonic') then
 
