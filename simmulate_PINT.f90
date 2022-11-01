@@ -245,7 +245,7 @@ if (interaction == 'harmonic') then
     read(1,*)
     read(1,*) parameters(1)
 elseif (interaction == '1Ddouble') then
-    ! omega, k
+    ! D, a
     read(1,*)
     read(1,*) parameters(1), parameters(2)
 end if
@@ -459,13 +459,13 @@ PE = PE / nbead
 
 end subroutine
 
-subroutine calc_forces_1Ddouble(q,F,N,nbead,m,omega,k)
+subroutine calc_forces_1Ddouble(q,F,N,nbead,m,D,a)
 implicit none
 double precision, dimension(nbead,3,N) :: q, F
 integer :: N
 integer :: nbead
 integer :: i, l, j
-real :: omega, k, m
+real :: D, a, m
 
 !
 ! Each "particle" represents in reality three decoupled DOFs each moving in
@@ -475,7 +475,7 @@ real :: omega, k, m
 do i = 1,nbead
     do j = 1,3
         do l = 1,N
-            F(i,j,l) = - k * (q(i,j,l) ** 3) + m * (omega**2) * q(i,j,l)
+            F(i,j,l) = - D * q(i,j,l) * ((q(i,j,l) ** 2) - a ** 2)
         end do
     end do
 end do
@@ -483,14 +483,14 @@ end do
 
 end subroutine
 
-subroutine calc_PE_1Ddouble(q,PE,N,nbead,m,omega,k)
+subroutine calc_PE_1Ddouble(q,PE,N,nbead,m,D,a)
 implicit none
 double precision, dimension(nbead,3,N) :: q
 double precision :: PE
 integer :: N 
 integer :: nbead
-integer :: i, j
-real :: omega, k, m
+integer :: i, j, k
+real :: D, a, m
 
 !
 ! Each "particle" represents in reality three decoupled DOFs each moving in
@@ -501,8 +501,9 @@ PE = 0
 
 do i = 1,nbead
     do j = 1,N
-        PE = PE + 0.25 * k * (q(i,1,j)**4 + q(i,2,j)**4 + q(i,3,j)**4) - &
-         0.5 * m * (omega**2) * (q(i,1,j)**2 + q(i,2,j)**2 + q(i,3,j)**2)
+        do k = 1,3
+            PE = PE + 0.25 * D * (q(i,k,j) ** 2 - a ** 2) ** 2
+        end do
     end do
 end do
 
