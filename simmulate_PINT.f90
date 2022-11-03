@@ -78,9 +78,9 @@ real :: m
 real :: gamma
 real :: alpha
 real :: target_freq
+real, dimension(nbead) :: nm_masses
 real, dimension(parameter_number) :: parameters
 double precision, dimension(nbead, 3, N) :: p, q, F , q_nm, p_nm
-double precision, dimension(nbead, 3, 2 * N) :: init
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
 integer :: i
@@ -121,20 +121,6 @@ open(2, file = 'energies.dat', status = 'new')
 
 open(4*nbead + 6, file = 'energies_classical.dat', status = 'new')
 
-! Initialize momenta
-
-! Inefficient usage of Box-Mueller ... Half of them gets lost - not that
-! important during init ...
-
-call random_number(init)
-do l = 1,nbead
-    do k = 1,N
-        do j = 1,3
-            p(l,j,k) = ((- 2 * log(init(l,j,k))) ** 0.5) * cos(2 * PI * init(l,j, k + N)) * (nbead * temperature * m)**0.5
-        end do
-    end do
-end do
-
 ! Initialize positions 
 
 if (inp_type == 'fromgrid') then
@@ -150,39 +136,80 @@ call calc_forces(q, F, N, nbead, m, interaction, parameters, parameter_number)
 
 ! Initialize nm_matrix and frequencies
 
-call init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq)
+call init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq, m , nm_masses)
+
+! Initialize momenta
+
+call init_momenta(p, nm_masses, nm_matrix, temperature, nbead, N)
 
 Nsteps = t/tau
 
 ! Obabo numerical evolution of the system
 
-if (thermostating == 'yay') then
-    do i=1,Nsteps
-        write(1,*) interaction
-        call do_output(q,p,F,nbead,N,nm_matrix,frequencies,m,temperature,interaction, parameters, parameter_number)
-        call thermostat(p, temperature, gamma, alpha, N, nbead, m, nm_matrix, frequencies, tau/2)
-        call momentum_step(p,F,N,nbead,k,l,tau/2)
-        call replica_step(q,p,N,nbead,nm_matrix,frequencies,m,tau,centroid_constraint)
-        call calc_forces(q,F,N,nbead,m,interaction,parameters,parameter_number)
-        call momentum_step(p,F,N,nbead,k,l,tau/2)
-        call thermostat(p, temperature, gamma, alpha, N, nbead, m, nm_matrix, frequencies, tau/2)
-    end do
-elseif (thermostating == 'nay') then
-    do i=1,Nsteps
-        write(1,*) interaction
-        call do_output(q,p,F,nbead,N,nm_matrix,frequencies,m,temperature,interaction, parameters, parameter_number)
-        call momentum_step(p,F,N,nbead,k,l,tau/2)
-        call replica_step(q,p,N,nbead,nm_matrix,frequencies,m,tau,centroid_constraint)
-        call calc_forces(q,F,N,nbead,m,interaction,parameters,parameter_number)
-        call momentum_step(p,F,N,nbead,k,l,tau/2)
-    end do
-end if
+do i=1,Nsteps
+    write(1,*) interaction
+    call do_output(q,p,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction, parameters, parameter_number)
+    if (thermostating == 'yay') then
+        call thermostat(p, temperature, gamma, alpha, N, nbead, nm_masses, nm_matrix, frequencies, tau/2)
+    end if
+    call momentum_step(p,F,N,nbead,k,l,tau/2)
+    call replica_step(q,p,N,nbead,nm_matrix,frequencies,nm_masses,tau,centroid_constraint)
+    call calc_forces(q,F,N,nbead,m,interaction,parameters,parameter_number)
+    call momentum_step(p,F,N,nbead,k,l,tau/2)
+    if (thermostating == 'yay') then
+        call thermostat(p, temperature, gamma, alpha, N, nbead, nm_masses, nm_matrix, frequencies, tau/2)
+    end if
+end do
 
 end subroutine
 
 !
 !  Introduced for a perhaps better modularity
 !
+
+subroutine init_momenta(p, nm_masses, nm_matrix, temperature, nbead, N)
+double precision, dimension(nbead, 3, N) :: p, p_nm
+double precision, dimension(nbead, 3, 2 * N) :: init
+double precision, dimension(nbead, nbead) :: nm_matrix
+real, dimension(nbead) :: nm_masses
+real :: temperature
+integer :: nbead
+integer :: N
+integer :: i,l,k,j
+
+do k = 1,3
+    do j = 1,N
+        do i = 1,nbead
+            p_nm(i,k,j) = 0
+            do l = 1, nbead
+                p_nm(i,k,j) = p_nm(i,k,j) + nm_matrix(i, l) * p(l,k,j)
+            end do
+        end do 
+    end do
+end do
+
+call random_number(init)
+do l = 1,nbead
+    do k = 1,N
+        do j = 1,3
+            p_nm(l,j,k) = ((- 2 * log(init(l,j,k))) ** 0.5) * cos(2 * PI * init(l,j, k + N)) &
+             * (nbead * temperature * nm_masses(l))**0.5
+        end do
+    end do
+end do
+
+do k = 1,3
+    do j = 1,N
+        do i = 1,nbead
+            p(i,k,j) = 0
+            do l = 1, nbead
+                p(i,k,j) = p(i,k,j) + nm_matrix(l, i) * p_nm(l,k,j)
+            end do
+        end do 
+    end do
+end do
+
+end subroutine
 
 subroutine grid(q, N, nbead, n_dir, box)
 double precision, dimension(nbead, 3, N) :: q
@@ -253,11 +280,13 @@ close(1)
 end subroutine
 
 
-subroutine init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq)
+subroutine init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq, m, nm_masses)
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
 integer :: nbead
 integer :: i, j
+real :: m 
+real, dimension(nbead) :: nm_masses
 real :: temperature
 real :: target_freq
 character(len = 4) :: freq_type
@@ -287,6 +316,7 @@ if (freq_type == 'rpmd') then
     ! Set to physical frequencies in rpmd case
     do i = 1,nbead
         frequencies(i) = 2*(temperature * nbead) * sin((i - 1) * PI / nbead)
+        nm_masses(i) = m
     end do
 
     do i = 1,nbead
@@ -295,8 +325,12 @@ if (freq_type == 'rpmd') then
 elseif (freq_type == 'pcmd') then
     ! Set all besides the centroid to specified frequency in the pa-cmd case
     frequencies(1) = 0
+
+    nm_masses(1) = m
+
     do i = 2,nbead
         frequencies(i) = target_freq
+        nm_masses(i) = m * (((2*(temperature * nbead) * sin((i - 1) * PI / nbead)) ** 2) /(target_freq ** 2))
     end do
 end if
 end subroutine
@@ -345,13 +379,13 @@ end if
 end subroutine
 
 
-subroutine do_output(q,p,F,nbead,N,nm_matrix,frequencies,m,temperature,interaction,parameters,parameter_number)
+subroutine do_output(q,p,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction,parameters,parameter_number)
 double precision, dimension(nbead, 3, N) :: q, p, q_nm, p_nm, F, F_nm 
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
 double precision :: KE, PE, temp, KE_class, PE_class_aux
 real :: temperature
-real :: m
+real, dimension(nbead) :: nm_masses
 integer :: parameter_number
 real, dimension(parameter_number) :: parameters
 character(len = 8) :: interaction
@@ -407,10 +441,10 @@ do k = 1,N
 
     write(4*nbead + 5,*) 'X', F_nm(1,1,k) / (nbead ** 0.5), F_nm(1,2,k) / (nbead ** 0.5), F_nm(1,3,k) / (nbead ** 0.5)
 end do
-call calc_KE_classical(KE_class,p,m,N,nbead)
-call calc_PE_classical_auxiliary(PE_class_aux,q_nm,frequencies,m,N,nbead)
+call calc_KE_classical(KE_class,p_nm,nm_masses,N,nbead)
+call calc_PE_classical_auxiliary(PE_class_aux,q_nm,frequencies,nm_masses,N,nbead)
 call calc_KE(q,F,KE,N,nbead,temperature)
-call calc_PE(q,PE,N,nbead,m,interaction,parameters,parameter_number)
+call calc_PE(q,PE,N,nbead,nm_masses(1),interaction,parameters,parameter_number)
 temp = (2 * KE_class / (3 * N * nbead))
 write(2,*) KE, PE, KE + PE, temp
 write(4*nbead+6,*) KE_class, PE_class_aux + PE*nbead, KE_class + PE_class_aux + PE*nbead
@@ -545,27 +579,27 @@ end do
 
 end subroutine
 
-subroutine calc_KE_classical(KE,p,m,N,nbead)
+subroutine calc_KE_classical(KE,p,nm_masses,N,nbead)
 double precision, dimension(nbead,3,N) :: p
 double precision :: KE
-real :: m
+real, dimension(nbead) :: nm_masses
 integer :: N 
 integer :: k
 integer :: j
 KE = 0
 do k = 1,N
     do j = 1,nbead
-        KE = KE + (p(j,1,k)**2 + p(j,2,k)**2 + p(j,3,k)**2)/(2*m)
+        KE = KE + (p(j,1,k)**2 + p(j,2,k)**2 + p(j,3,k)**2)/(2*nm_masses(j))
     end do
 end do
 end subroutine
 
-subroutine calc_PE_classical_auxiliary(PE,q,frequencies,m,N,nbead)
+subroutine calc_PE_classical_auxiliary(PE,q,frequencies,nm_masses,N,nbead)
 !Takes normal mode coordinates as an input
 double precision, dimension(nbead,3,N) :: q
 double precision, dimension(nbead) :: frequencies
 double precision :: PE
-real :: m 
+real, dimension(nbead) :: nm_masses 
 integer :: N 
 integer :: nbead
 integer :: i 
@@ -575,7 +609,7 @@ PE = 0
 
 do i = 1,N
     do j = 1,nbead
-        PE = PE + 0.5 * ((frequencies(j)) ** 2) * m * (q(j,1,i) ** 2 + q(j,2,i) ** 2 + q(j,3,i) ** 2)
+        PE = PE + 0.5 * ((frequencies(j)) ** 2) * nm_masses(j) * (q(j,1,i) ** 2 + q(j,2,i) ** 2 + q(j,3,i) ** 2)
     end do
 end do
 
@@ -604,7 +638,7 @@ do k = 1,N
 end do
 end subroutine
 
-subroutine replica_step(q,p,N,nbead,nm_matrix,frequencies,m,tau,centroid_constraint)
+subroutine replica_step(q,p,N,nbead,nm_matrix,frequencies,nm_masses,tau,centroid_constraint)
 implicit none
 double precision, dimension(nbead,3,N) :: q, p
 double precision, dimension(nbead,3,N) ::q_nm, p_nm
@@ -619,7 +653,7 @@ integer :: k
 integer :: j
 integer :: l
 real :: tau
-real :: m
+real, dimension(nbead) :: nm_masses
 character(len = 3) :: centroid_constraint
 do k = 1,3
     do j = 1,N
@@ -640,13 +674,14 @@ do k = 1,3
         if (centroid_constraint == 'nay') then
             q_nm_temp = q_nm(1,k,j)
             p_nm_temp = p_nm(1,k,j)
-            q_nm(1,k,j) = (1 / m) * p_nm_temp * tau + q_nm_temp
+            q_nm(1,k,j) = (1 / nm_masses(1)) * p_nm_temp * tau + q_nm_temp
         end if
         do i = 2,nbead
             q_nm_temp = q_nm(i,k,j)
             p_nm_temp = p_nm(i,k,j)
-            p_nm(i,k,j) = cos(frequencies(i) * tau) * p_nm_temp - m * frequencies(i) * sin(frequencies(i) * tau) * q_nm_temp
-            q_nm(i,k,j) = (1 / (m * frequencies(i))) * sin(frequencies(i) * tau) * p_nm_temp
+            p_nm(i,k,j) = cos(frequencies(i) * tau) * p_nm_temp - nm_masses(i) * frequencies(i) &
+             * sin(frequencies(i) * tau) * q_nm_temp
+            q_nm(i,k,j) = (1 / (nm_masses(i) * frequencies(i))) * sin(frequencies(i) * tau) * p_nm_temp
             q_nm(i,k,j) = q_nm(i,k,j) + cos(frequencies(i) * tau) * q_nm_temp
         end do 
     end do
@@ -666,7 +701,7 @@ do k = 1,3
 end do
 end subroutine
 
-subroutine thermostat(p, temperature, gamma, scale, N, nbead, m, nm_matrix, frequencies, tau)
+subroutine thermostat(p, temperature, gamma, scale, N, nbead, nm_masses, nm_matrix, frequencies, tau)
 ! Langevin
 double precision, dimension(nbead,3,N) :: p
 double precision, dimension(nbead,3,N) :: p_nm
@@ -676,7 +711,7 @@ double precision, dimension(nbead) :: frequencies
 double precision :: KE
 real :: gamma
 real :: scale
-real :: m
+real, dimension(nbead) :: nm_masses
 real :: tau
 real :: temperature
 integer :: N
@@ -708,7 +743,7 @@ do i = 2,nbead
     B = (1 - A ** 2) ** 0.5
     do k = 1,N
         do j = 1,3
-            p_nm(i,j,k) = p_nm(i,j,k) * A + ((m * temperature * nbead) ** 0.5) &
+            p_nm(i,j,k) = p_nm(i,j,k) * A + ((nm_masses(i) * temperature * nbead) ** 0.5) &
              * B * ((- 2 * log(init(i,j,k))) ** 0.5) * cos(2 * PI * init(i,j, k + N))
         end do
     end do
@@ -719,7 +754,7 @@ if (local .eqv. .TRUE.) then
     B = (1 - A ** 2) ** 0.5
     do k = 1,N
         do j = 1,3
-            p_nm(1,j,k) = p_nm(1,j,k) * A + ((m * temperature * nbead) ** 0.5) &
+            p_nm(1,j,k) = p_nm(1,j,k) * A + ((nm_masses(1) * temperature * nbead) ** 0.5) &
              * B * ((- 2 * log(init(1,j,k))) ** 0.5) * cos(2 * PI * init(1,j, k + N))
         end do
     end do
