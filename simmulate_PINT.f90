@@ -78,7 +78,7 @@ real :: m
 real :: gamma
 real :: alpha
 real :: target_freq
-real, dimension(nbead) :: nm_masses
+double precision, dimension(nbead) :: nm_masses
 real, dimension(parameter_number) :: parameters
 double precision, dimension(nbead, 3, N) :: p, q, F , q_nm, p_nm
 double precision, dimension(nbead, nbead) :: nm_matrix
@@ -171,7 +171,7 @@ subroutine init_momenta(p, nm_masses, nm_matrix, temperature, nbead, N)
 double precision, dimension(nbead, 3, N) :: p, p_nm
 double precision, dimension(nbead, 3, 2 * N) :: init
 double precision, dimension(nbead, nbead) :: nm_matrix
-real, dimension(nbead) :: nm_masses
+double precision, dimension(nbead) :: nm_masses
 real :: temperature
 integer :: nbead
 integer :: N
@@ -286,7 +286,7 @@ double precision, dimension(nbead) :: frequencies
 integer :: nbead
 integer :: i, j
 real :: m 
-real, dimension(nbead) :: nm_masses
+double precision, dimension(nbead) :: nm_masses
 real :: temperature
 real :: target_freq
 character(len = 4) :: freq_type
@@ -368,7 +368,7 @@ integer :: i
 integer :: k
 integer :: j
 integer :: parameter_number
-real :: m
+double precision :: m
 
 if (interaction == 'harmonic') then
     call calc_PE_harmonic(q,PE,N,nbead,m,parameters(1))
@@ -385,7 +385,7 @@ double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
 double precision :: KE, PE, temp, KE_class, PE_class_aux
 real :: temperature
-real, dimension(nbead) :: nm_masses
+double precision, dimension(nbead) :: nm_masses
 integer :: parameter_number
 real, dimension(parameter_number) :: parameters
 character(len = 8) :: interaction
@@ -479,7 +479,7 @@ integer :: i
 integer :: k
 integer :: j
 real :: omega
-real :: m
+double precision :: m
 
 PE = 0
 
@@ -524,7 +524,8 @@ double precision :: PE
 integer :: N 
 integer :: nbead
 integer :: i, j, k
-real :: D, a, m
+double precision :: m
+real :: D, a
 
 !
 ! Each "particle" represents in reality three decoupled DOFs each moving in
@@ -582,7 +583,7 @@ end subroutine
 subroutine calc_KE_classical(KE,p,nm_masses,N,nbead)
 double precision, dimension(nbead,3,N) :: p
 double precision :: KE
-real, dimension(nbead) :: nm_masses
+double precision, dimension(nbead) :: nm_masses
 integer :: N 
 integer :: k
 integer :: j
@@ -599,7 +600,7 @@ subroutine calc_PE_classical_auxiliary(PE,q,frequencies,nm_masses,N,nbead)
 double precision, dimension(nbead,3,N) :: q
 double precision, dimension(nbead) :: frequencies
 double precision :: PE
-real, dimension(nbead) :: nm_masses 
+double precision, dimension(nbead) :: nm_masses 
 integer :: N 
 integer :: nbead
 integer :: i 
@@ -653,7 +654,7 @@ integer :: k
 integer :: j
 integer :: l
 real :: tau
-real, dimension(nbead) :: nm_masses
+double precision, dimension(nbead) :: nm_masses
 character(len = 3) :: centroid_constraint
 do k = 1,3
     do j = 1,N
@@ -711,7 +712,7 @@ double precision, dimension(nbead) :: frequencies
 double precision :: KE
 real :: gamma
 real :: scale
-real, dimension(nbead) :: nm_masses
+double precision, dimension(nbead) :: nm_masses
 real :: tau
 real :: temperature
 integer :: N
