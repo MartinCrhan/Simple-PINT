@@ -300,7 +300,7 @@ do j = 1,nbead
     do i = 2,(floor(real(nbead/2)) + 1)
         nm_matrix(i,j) = (2**0.5) * cos(2 * PI * (i - 1) * (j - 1) / nbead) / (nbead ** 0.5)
     end do
-    do i = (floor(real(nbead/2)) + 1), nbead
+    do i = (floor(real(nbead/2)) + 2), nbead
         nm_matrix(i,j) = (2**0.5) * sin(2 * PI * (i - 1) * (j - 1) / nbead) / (nbead ** 0.5)
     end do
 end do
