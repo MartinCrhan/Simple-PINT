@@ -8,7 +8,6 @@ real :: m
 real :: temperature
 real :: alpha
 real :: gamma
-real :: omega
 real :: box
 real :: target_freq
 integer :: nbead
@@ -80,15 +79,12 @@ real :: alpha
 real :: target_freq
 double precision, dimension(nbead) :: nm_masses
 real, dimension(parameter_number) :: parameters
-double precision, dimension(nbead, 3, N) :: p, q, F , q_nm, p_nm
+double precision, dimension(nbead, 3, N) :: p, q, F
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
 integer :: i
-integer :: j
 integer :: k
 integer :: l
-integer :: y 
-integer :: z 
 integer :: Nsteps
 integer :: nbead
 integer :: parameter_number
@@ -99,12 +95,7 @@ character(len = 8) :: inp_type
 character(len = 4) :: freq_type
 character(len = 3) :: thermostating
 character(len = 3) :: centroid_constraint
-double precision :: KE
-double precision :: KE_class
-double precision :: PE
-double precision :: PE_class_aux 
-double precision :: temp
-real(16), parameter :: PI = 4 * atan (1.0_16)
+real(8), parameter :: PI = 4 * atan (1.0_8)
 fmt = '(I2.2)'
 do i = 1,nbead
     write (x,fmt) (i-1) 
@@ -290,7 +281,7 @@ double precision, dimension(nbead) :: nm_masses
 real :: temperature
 real :: target_freq
 character(len = 4) :: freq_type
-real(16), parameter :: PI = 4 * atan (1.0_16)
+real(8), parameter :: PI = 4 * atan (1.0_8)
 
 do i = 1,nbead
     nm_matrix(1,i) = 1 / (nbead ** 0.5)
@@ -342,9 +333,6 @@ real, dimension(parameter_number) :: parameters
 character(len = 8) :: interaction
 integer :: N
 integer :: nbead
-integer :: i 
-integer :: k
-integer :: j
 integer :: parameter_number
 real :: m
 
@@ -364,9 +352,6 @@ real, dimension(parameter_number) :: parameters
 character(len = 8) :: interaction
 integer :: N
 integer :: nbead
-integer :: i 
-integer :: k
-integer :: j
 integer :: parameter_number
 double precision :: m
 
@@ -477,7 +462,6 @@ integer :: N
 integer :: nbead
 integer :: i 
 integer :: k
-integer :: j
 real :: omega
 double precision :: m
 
@@ -722,7 +706,7 @@ double precision :: B
 double precision :: alpha
 double precision :: beta
 logical :: local
-real(16), parameter :: PI = 4 * atan (1.0_16)
+real(8), parameter :: PI = 4 * atan (1.0_8)
 
 local = .TRUE.
 
