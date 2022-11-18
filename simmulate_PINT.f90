@@ -2,7 +2,8 @@ program simmulate_PINT
 implicit none
 ! A simple currently unspecified dimensional program for running PINT simmulations in simple potentials
 integer :: N 
-integer :: t 
+integer :: t
+integer :: stride
 real :: tau
 real :: m
 real :: temperature
@@ -36,6 +37,7 @@ read(1,*) buffer, tau
 read(1,*) buffer, m
 read(1,*) buffer, box
 read(1,*) buffer, target_freq
+read(1,*) buffer, stride
 
 close(1)
 
@@ -57,6 +59,10 @@ elseif (int_type == '1Ddouble') then
 
     parameter_number = 2
 
+elseif (int_type == 'McKenzie') then
+
+    parameter_number = 6
+
 end if
 
 call run_simmulation(n_dir, N, nbead, thermostating, temperature, gamma, alpha, int_type, inp_type, freq_type, target_freq, &
@@ -65,11 +71,12 @@ call run_simmulation(n_dir, N, nbead, thermostating, temperature, gamma, alpha, 
 end program
 
 subroutine run_simmulation(n_dir, N, nbead, thermostating, temperature, gamma, alpha, interaction, inp_type, &
- freq_type, target_freq, parameter_number, centroid_constraint, t, tau, m, box)
+ freq_type, target_freq, parameter_number, centroid_constraint, t, tau, m, box, stride)
 implicit none
 integer :: N
 integer :: t
-integer n_dir 
+integer n_dir
+integer :: stride 
 real :: tau
 real :: box
 real :: temperature
@@ -139,7 +146,9 @@ Nsteps = t/tau
 
 do i=1,Nsteps
     write(1,*) interaction
-    call do_output(q,p,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction, parameters, parameter_number)
+    if (modulo(i, stride) == 0) then
+        call do_output(q,p,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction, parameters, parameter_number)
+    end if
     if (thermostating == 'yay') then
         call thermostat(p, temperature, gamma, alpha, N, nbead, nm_masses, nm_matrix, frequencies, tau/2)
     end if
@@ -266,6 +275,10 @@ elseif (interaction == '1Ddouble') then
     ! D, a
     read(1,*)
     read(1,*) parameters(1), parameters(2)
+elseif (interaction == 'McKenzie') then
+    ! D1, a1, D2, a2, G, g
+    read(1,*)
+    read(1,*) parameters(1), parameters(2), parameters(3), parameters(4), parameters(5), parameters(6)
 end if
 close(1)
 end subroutine
@@ -340,6 +353,8 @@ if (interaction == 'harmonic') then
     call calc_forces_harmonic(q,F,N,nbead,m,parameters(1))
 elseif (interaction == '1Ddouble') then
     call calc_forces_1Ddouble(q,F,N,nbead,m,parameters(1),parameters(2))
+elseif (interaction ==  'McKenzie') then
+    call calc_forces_McKenzie(q,F,N,nbead,m,parameters(1),parameters(2),parameters(3),parameters(4),parameters(5),parameters(6))
 end if
 
 end subroutine
@@ -359,6 +374,8 @@ if (interaction == 'harmonic') then
     call calc_PE_harmonic(q,PE,N,nbead,m,parameters(1))
 elseif (interaction == '1Ddouble') then
     call calc_PE_1Ddouble(q,PE,N,nbead,m,parameters(1),parameters(2))
+elseif (interaction == 'McKenzie') then
+    call calc_PE_McKenzie(q,PE,N,nbead,m,parameters(1),parameters(2),parameters(3),parameters(4),parameters(5),parameters(6))
 end if
 
 end subroutine
@@ -528,6 +545,60 @@ end do
 
 PE = PE / nbead
 
+end subroutine
+
+subroutine calc_forces_McKenzie(q,F,N,nbead,m,D1,a1,D2,a2,g1,g2)
+    implicit none
+    double precision, dimension(nbead,3,N) :: q, F
+    integer :: N
+    integer :: nbead
+    integer :: i, l
+    real :: D1, a1, D2, a2, g1, g2, m
+    
+    !
+    ! Each "particle" represents in reality three decoupled DOFs each moving in
+    ! a 1D double well potential.
+    !
+    
+    do i = 1,nbead
+        do l = 1,N
+            F(i,1,l) = - 2 * D1 * q(i,1,l) * (q(i,1,l) ** 2 - a1 ** 2) + 4 * g1 * q(i,2,l) - &
+             3 * g2 * q(i,2,l) * q(i,1,l) ** 2 - g2 * q(i,2,l) ** 2
+            F(i,2,l) = - 2 * D2 * q(i,2,l) * (q(i,2,l) ** 2 - a2 ** 2) + 4 * g1 * q(i,1,l) - &
+            3 * g2 * q(i,1,l) * q(i,2,l) ** 2 - g1 * q(i,1,l) ** 2
+            F(i,3,l) = - q(i,3,l)
+        end do
+    end do
+    
+    
+end subroutine
+
+subroutine calc_PE_McKenzie(q,PE,N,nbead,m,D1,a1,D2,a2,g1,g2)
+    implicit none
+    double precision, dimension(nbead,3,N) :: q
+    double precision :: PE
+    integer :: N 
+    integer :: nbead
+    integer :: i, j, k
+    double precision :: m
+    real :: D1, a1, d2, a2, g1, g2
+    
+    !
+    ! Each "particle" represents in reality three decoupled DOFs each moving in
+    ! a 1D double well potential.
+    !
+    
+    PE = 0
+    
+    do i = 1,nbead
+        do j = 1,N
+            PE = PE + 0.5 * (D1 * (q(i,1,j) ** 2 - a1 ** 2) ** 2 + D2 * (q(i,2,j) ** 2 - a2 ** 2) ** 2) - &
+            q(i,1,j) * q(i,2,j) * (4 * g1 - g2 * (q(i,1,j) ** 2 + q(i,2,j) ** 2)) + 0.5 * q(i,3,j) ** 2
+        end do
+    end do
+    
+    PE = PE / nbead
+    
 end subroutine
 
 subroutine calc_KE(q,F,KE,N,nbead,temperature)
