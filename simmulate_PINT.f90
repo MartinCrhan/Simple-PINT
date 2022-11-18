@@ -66,7 +66,7 @@ elseif (int_type == 'McKenzie') then
 end if
 
 call run_simmulation(n_dir, N, nbead, thermostating, temperature, gamma, alpha, int_type, inp_type, freq_type, target_freq, &
- parameter_number, centroid_constraint, t, tau, m, box)
+ parameter_number, centroid_constraint, t, tau, m, box, stride)
 
 end program
 
