@@ -86,7 +86,7 @@ real :: alpha
 real :: target_freq
 double precision, dimension(nbead) :: nm_masses
 real, dimension(parameter_number) :: parameters
-double precision, dimension(nbead, 3, N) :: p_nm, q_nm, F
+double precision, dimension(nbead, 3, N) :: p, p_nm, q_nm, F
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
 integer :: i
@@ -205,6 +205,119 @@ end do
 
 end subroutine
 
+subroutine to_nm_fftw(x, x_nm, nbead, N)
+! Kinda awkward at the moment
+use, intrinsic :: iso_c_binding 
+implicit none
+include 'fftw3.f03'
+double precision, dimension(nbead, 3, N) :: x, x_nm
+complex (kind = 8), dimension(nbead, 3, N) :: fft_array
+type(c_ptr) :: plan
+integer :: nbead
+integer :: N
+integer :: i, j, k, l, halfpoint_1, halfpoint_2
+
+halfpoint_1 = nbead/2
+halfpoint_2 = (nbead/2 + 1)
+
+do k = 1,3
+    do j = 1,N
+        do i = 1,nbead
+            fft_array(i,k,j) = complex(x(i,k,j), 0)
+        end do 
+    end do
+end do
+
+plan = fftw_plan_dft_1d(nbead, fft_array(1:nbead, 1, 1), fft_array(1:nbead, 1, 1) , FFTW_FORWARD,FFTW_ESTIMATE)
+
+do k = 1,3
+    do j = 1,N
+        call fftw_execute_dft(plan, fft_array(1:nbead, k, j), fft_array(1:nbead, k, j))
+    end do
+end do
+
+call fftw_destroy_plan(plan)
+
+do k = 1,3
+    do j = 1,N
+        if (modulo(nbead, 2) == 0) then
+            x_nm(1, k, j) = realpart(fft_array(1, k, j)) / (nbead ** 0.5)
+            do l = 2,halfpoint_1
+                x_nm(l, k, j) = realpart(fft_array(l, k, j)) * (( 2 ** 0.5) / (nbead ** 0.5))
+                x_nm(nbead - l + 2, k, j) = imagpart(fft_array(l, k, j)) * (( 2 ** 0.5) / (nbead ** 0.5))
+            end do
+            x_nm(halfpoint_2, k , j) = realpart(fft_array(halfpoint_2, k, j)) / (nbead ** 0.5)
+        else
+            x_nm(1, k, j) = realpart(fft_array(1, k, j)) / (nbead ** 0.5)
+            do l = 2,halfpoint_2
+                x_nm(l, k, j) = realpart(fft_array(l, k, j)) * (( 2 ** 0.5) / (nbead ** 0.5))
+                x_nm(nbead - l + 2, k, j) = imagpart(fft_array(l, k, j)) * (( 2 ** 0.5) / (nbead ** 0.5))
+            end do
+        end if
+    end do
+end do
+
+end subroutine
+
+subroutine from_nm_fftw(x, x_nm, nbead, N)
+use, intrinsic :: iso_c_binding 
+implicit none
+include 'fftw3.f03'
+double precision, dimension(nbead, 3, N) :: x, x_nm
+complex (kind = 8), dimension(nbead, 3, N) :: fft_array
+type(c_ptr) :: plan
+integer :: nbead
+integer :: N
+integer :: i, j, k, l, halfpoint_1, halfpoint_2
+
+halfpoint_1 = nbead/2
+halfpoint_2 = (nbead/2 + 1)
+
+do k = 1,3
+    do j = 1,N
+        if (modulo(nbead, 2) == 0) then
+            fft_array(1, k, j) = complex(x_nm(1, k, j) * (nbead ** 0.5), 0)
+            do l = 2,halfpoint_1
+                fft_array(l, k, j) = complex(x_nm(l, k, j) * ((nbead ** 0.5) / (2 ** 0.5)), &
+                 x_nm(nbead - l + 2, k, j) * ((nbead ** 0.5) / (2 ** 0.5)))
+                fft_array(nbead - l + 2, k, j) = complex(x_nm(l, k, j) * ((nbead ** 0.5) / (2 ** 0.5)), &
+                 - x_nm(nbead - l + 2, k, j) * ((nbead ** 0.5) / (2 ** 0.5)))
+            end do
+            fft_array(halfpoint_2, k, j) = complex(x_nm(halfpoint_2, k, j) * (nbead ** 0.5), 0)
+        else
+            fft_array(1, k, j) = complex(x_nm(1, k, j) * (nbead ** 0.5), 0)
+            do l = 2,halfpoint_2
+                fft_array(l, k, j) = complex(x_nm(l, k, j) * ((nbead ** 0.5) / (2 ** 0.5)), &
+                 x_nm(nbead - l + 2, k, j) * ((nbead ** 0.5) / (2 ** 0.5)))
+                fft_array(nbead - l + 2, k, j) = complex(x_nm(l, k, j) * ((nbead ** 0.5) / (2 ** 0.5)), &
+                 - x_nm(nbead - l + 2, k, j) * ((nbead ** 0.5) / (2 ** 0.5)))
+            end do
+        end if
+    end do
+end do
+
+plan = fftw_plan_dft_1d(nbead, fft_array(1:nbead, 1, 1), fft_array(1:nbead, 1, 1) , FFTW_BACKWARD, FFTW_ESTIMATE)
+
+do k = 1,3
+    do j = 1,N
+        call fftw_execute_dft(plan, fft_array(1:nbead, k, j), fft_array(1:nbead, k, j))
+    end do
+end do
+
+call fftw_destroy_plan(plan)
+
+do k = 1,3
+    do j = 1,N
+        do i = 1,nbead
+            ! This differs from th pyhton case, as numpy actually
+            ! includes the division by nbead in it's definition of the fft
+            x(i,k,j) = realpart(fft_array(i, k, j)) / nbead
+        end do 
+    end do
+end do
+
+end subroutine
+
 subroutine init_momenta(p_nm, nm_masses, nm_matrix, temperature, nbead, N)
 double precision, dimension(nbead, 3, N) :: p_nm
 double precision, dimension(nbead, 3, 2 * N) :: init
@@ -254,7 +367,7 @@ do l = 1,nbead
     end do
 end do
 
-call to_nm(q, q_nm, nm_matrix, nbead, N)
+call to_nm_fftw(q, q_nm, nbead, N)
 
 end subroutine
 
@@ -279,7 +392,7 @@ do i = 1,nbead
     close(i + 2*nbead + 4)
 end do
 
-call to_nm(q, q_nm, nm_matrix, nbead, N)
+call to_nm_fftw(q, q_nm, nbead, N)
 
 end subroutine
 
@@ -372,7 +485,7 @@ integer :: nbead
 integer :: parameter_number
 real :: m
 
-call from_nm(q, q_nm , nm_matrix, nbead, N)
+call from_nm_fftw(q, q_nm , nbead, N)
 
 if (interaction == 'harmonic') then
     call calc_forces_harmonic(q,F,N,nbead,m,parameters(1))
@@ -436,9 +549,9 @@ write(4*nbead + 5,*)
 ! write(4,*) "New frame"
 !temp = (2 * KE / (3*N))
 
-call from_nm(q, q_nm , nm_matrix, nbead, N)
-call from_nm(p, p_nm , nm_matrix, nbead, N)
-call to_nm(F, F_nm , nm_matrix, nbead, N)
+call from_nm_fftw(q, q_nm , nbead, N)
+call from_nm_fftw(p, p_nm , nbead, N)
+call to_nm_fftw(F, F_nm , nbead, N)
 
 do k = 1,N
     do l = 1,nbead
@@ -700,7 +813,7 @@ integer :: j
 integer :: l
 real :: tau
 
-call from_nm(p, p_nm , nm_matrix, nbead, N)
+call from_nm_fftw(p, p_nm , nbead, N)
 
 do k = 1,N
     do j = 1,3
@@ -710,7 +823,7 @@ do k = 1,N
     end do
 end do
 
-call to_nm(p, p_nm , nm_matrix, nbead, N)
+call to_nm_fftw(p, p_nm , nbead, N)
 
 end subroutine
 
