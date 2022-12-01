@@ -86,7 +86,7 @@ real :: alpha
 real :: target_freq
 double precision, dimension(nbead) :: nm_masses
 real, dimension(parameter_number) :: parameters
-double precision, dimension(nbead, 3, N) :: p, q, F
+double precision, dimension(nbead, 3, N) :: p, p_nm, q_nm, F
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
 integer :: i
@@ -119,26 +119,27 @@ open(2, file = 'energies.dat', status = 'new')
 
 open(4*nbead + 6, file = 'energies_classical.dat', status = 'new')
 
-! Initialize positions 
-
-if (inp_type == 'fromgrid') then
-    call grid(q, N, nbead, n_dir, box)
-elseif ( inp_type == 'frominpt' ) then
-    call init_coordinates(q,nbead,N)
-end if
-! Initialize forces
-
-call init_interactions(interaction, parameters, parameter_number)
-
-call calc_forces(q, F, N, nbead, m, interaction, parameters, parameter_number)
-
 ! Initialize nm_matrix and frequencies
 
 call init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq, m , nm_masses)
 
+! Initialize positions
+
+if (inp_type == 'fromgrid') then
+    call grid(q_nm, N, nbead, n_dir, box, nm_matrix)
+elseif ( inp_type == 'frominpt' ) then
+    call init_coordinates(q_nm, nbead, N, nm_matrix)
+end if
+
+! Initialize forces
+
+call init_interactions(interaction, parameters, parameter_number)
+
+call calc_forces(q_nm, F, N, nbead, m, interaction, parameters, parameter_number, nm_matrix)
+
 ! Initialize momenta
 
-call init_momenta(p, nm_masses, nm_matrix, temperature, nbead, N)
+call init_momenta(p_nm, nm_masses, nm_matrix, temperature, nbead, N)
 
 Nsteps = t/tau
 
@@ -146,18 +147,18 @@ Nsteps = t/tau
 
 do i=1,Nsteps
     write(1,*) interaction
-    if (modulo(i, stride) == 0) then
-        call do_output(q,p,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction, parameters, parameter_number)
+    if (modulo((i - 1), stride) == 0) then
+        call do_output(q_nm,p_nm,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction, parameters, parameter_number)
     end if
     if (thermostating == 'yay') then
-        call thermostat(p, temperature, gamma, alpha, N, nbead, nm_masses, nm_matrix, frequencies, tau/2)
+        call thermostat(p_nm, temperature, gamma, alpha, N, nbead, nm_masses, frequencies, tau/2)
     end if
-    call momentum_step(p,F,N,nbead,k,l,tau/2)
-    call replica_step(q,p,N,nbead,nm_matrix,frequencies,nm_masses,tau,centroid_constraint)
-    call calc_forces(q,F,N,nbead,m,interaction,parameters,parameter_number)
-    call momentum_step(p,F,N,nbead,k,l,tau/2)
+    call momentum_step(p_nm,F,N,nbead,k,l,nm_matrix,tau/2)
+    call replica_step(q_nm,p_nm,N,nbead,frequencies,nm_masses,tau,centroid_constraint)
+    call calc_forces(q_nm,F,N,nbead,m,interaction,parameters,parameter_number, nm_matrix)
+    call momentum_step(p_nm,F,N,nbead,k,l,nm_matrix,tau/2)
     if (thermostating == 'yay') then
-        call thermostat(p, temperature, gamma, alpha, N, nbead, nm_masses, nm_matrix, frequencies, tau/2)
+        call thermostat(p_nm, temperature, gamma, alpha, N, nbead, nm_masses, frequencies, tau/2)
     end if
 end do
 
@@ -167,8 +168,158 @@ end subroutine
 !  Introduced for a perhaps better modularity
 !
 
-subroutine init_momenta(p, nm_masses, nm_matrix, temperature, nbead, N)
-double precision, dimension(nbead, 3, N) :: p, p_nm
+subroutine to_nm(x, x_nm , nm_matrix, nbead, N)
+double precision, dimension(nbead, 3, N) :: x, x_nm
+double precision, dimension(nbead, nbead) :: nm_matrix
+integer :: nbead
+integer :: N
+do k = 1,3
+    do j = 1,N
+        do i = 1,nbead
+            x_nm(i,k,j) = 0
+            do l = 1, nbead
+                x_nm(i,k,j) = x_nm(i,k,j) + nm_matrix(i, l) * x(l,k,j)
+            end do
+        end do 
+    end do
+end do
+
+end subroutine
+
+subroutine from_nm(x, x_nm , nm_matrix, nbead, N)
+double precision, dimension(nbead, 3, N) :: x, x_nm
+double precision, dimension(nbead, nbead) :: nm_matrix
+integer :: nbead
+integer :: N
+
+do k = 1,3
+    do j = 1,N
+        do i = 1,nbead
+            x(i,k,j) = 0
+            do l = 1, nbead
+                x(i,k,j) = x(i,k,j) + nm_matrix(l, i) * x_nm(l,k,j)
+            end do
+        end do 
+    end do
+end do
+
+end subroutine
+
+subroutine to_nm_fftw(x, x_nm, nbead, N)
+! Kinda awkward at the moment
+use, intrinsic :: iso_c_binding 
+implicit none
+include 'fftw3.f03'
+double precision, dimension(nbead, 3, N) :: x, x_nm
+complex (kind = 8), dimension(nbead, 3, N) :: fft_array
+type(c_ptr) :: plan
+integer :: nbead
+integer :: N
+integer :: i, j, k, l, halfpoint_1, halfpoint_2
+
+halfpoint_1 = nbead/2
+halfpoint_2 = (nbead/2 + 1)
+
+do k = 1,3
+    do j = 1,N
+        do i = 1,nbead
+            fft_array(i,k,j) = complex(x(i,k,j), 0)
+        end do 
+    end do
+end do
+
+plan = fftw_plan_dft_1d(nbead, fft_array(1:nbead, 1, 1), fft_array(1:nbead, 1, 1) , FFTW_FORWARD,FFTW_ESTIMATE)
+
+do k = 1,3
+    do j = 1,N
+        call fftw_execute_dft(plan, fft_array(1:nbead, k, j), fft_array(1:nbead, k, j))
+    end do
+end do
+
+call fftw_destroy_plan(plan)
+
+do k = 1,3
+    do j = 1,N
+        if (modulo(nbead, 2) == 0) then
+            x_nm(1, k, j) = realpart(fft_array(1, k, j)) / (nbead ** 0.5)
+            do l = 2,halfpoint_1
+                x_nm(l, k, j) = realpart(fft_array(l, k, j)) * (( 2 ** 0.5) / (nbead ** 0.5))
+                x_nm(nbead - l + 2, k, j) = imagpart(fft_array(l, k, j)) * (( 2 ** 0.5) / (nbead ** 0.5))
+            end do
+            x_nm(halfpoint_2, k , j) = realpart(fft_array(halfpoint_2, k, j)) / (nbead ** 0.5)
+        else
+            x_nm(1, k, j) = realpart(fft_array(1, k, j)) / (nbead ** 0.5)
+            do l = 2,halfpoint_2
+                x_nm(l, k, j) = realpart(fft_array(l, k, j)) * (( 2 ** 0.5) / (nbead ** 0.5))
+                x_nm(nbead - l + 2, k, j) = imagpart(fft_array(l, k, j)) * (( 2 ** 0.5) / (nbead ** 0.5))
+            end do
+        end if
+    end do
+end do
+
+end subroutine
+
+subroutine from_nm_fftw(x, x_nm, nbead, N)
+use, intrinsic :: iso_c_binding 
+implicit none
+include 'fftw3.f03'
+double precision, dimension(nbead, 3, N) :: x, x_nm
+complex (kind = 8), dimension(nbead, 3, N) :: fft_array
+type(c_ptr) :: plan
+integer :: nbead
+integer :: N
+integer :: i, j, k, l, halfpoint_1, halfpoint_2
+
+halfpoint_1 = nbead/2
+halfpoint_2 = (nbead/2 + 1)
+
+do k = 1,3
+    do j = 1,N
+        if (modulo(nbead, 2) == 0) then
+            fft_array(1, k, j) = complex(x_nm(1, k, j) * (nbead ** 0.5), 0)
+            do l = 2,halfpoint_1
+                fft_array(l, k, j) = complex(x_nm(l, k, j) * ((nbead ** 0.5) / (2 ** 0.5)), &
+                 x_nm(nbead - l + 2, k, j) * ((nbead ** 0.5) / (2 ** 0.5)))
+                fft_array(nbead - l + 2, k, j) = complex(x_nm(l, k, j) * ((nbead ** 0.5) / (2 ** 0.5)), &
+                 - x_nm(nbead - l + 2, k, j) * ((nbead ** 0.5) / (2 ** 0.5)))
+            end do
+            fft_array(halfpoint_2, k, j) = complex(x_nm(halfpoint_2, k, j) * (nbead ** 0.5), 0)
+        else
+            fft_array(1, k, j) = complex(x_nm(1, k, j) * (nbead ** 0.5), 0)
+            do l = 2,halfpoint_2
+                fft_array(l, k, j) = complex(x_nm(l, k, j) * ((nbead ** 0.5) / (2 ** 0.5)), &
+                 x_nm(nbead - l + 2, k, j) * ((nbead ** 0.5) / (2 ** 0.5)))
+                fft_array(nbead - l + 2, k, j) = complex(x_nm(l, k, j) * ((nbead ** 0.5) / (2 ** 0.5)), &
+                 - x_nm(nbead - l + 2, k, j) * ((nbead ** 0.5) / (2 ** 0.5)))
+            end do
+        end if
+    end do
+end do
+
+plan = fftw_plan_dft_1d(nbead, fft_array(1:nbead, 1, 1), fft_array(1:nbead, 1, 1) , FFTW_BACKWARD, FFTW_ESTIMATE)
+
+do k = 1,3
+    do j = 1,N
+        call fftw_execute_dft(plan, fft_array(1:nbead, k, j), fft_array(1:nbead, k, j))
+    end do
+end do
+
+call fftw_destroy_plan(plan)
+
+do k = 1,3
+    do j = 1,N
+        do i = 1,nbead
+            ! This differs from th pyhton case, as numpy actually
+            ! includes the division by nbead in it's definition of the fft
+            x(i,k,j) = realpart(fft_array(i, k, j)) / nbead
+        end do 
+    end do
+end do
+
+end subroutine
+
+subroutine init_momenta(p_nm, nm_masses, nm_matrix, temperature, nbead, N)
+double precision, dimension(nbead, 3, N) :: p_nm
 double precision, dimension(nbead, 3, 2 * N) :: init
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: nm_masses
@@ -176,17 +327,6 @@ real :: temperature
 integer :: nbead
 integer :: N
 integer :: i,l,k,j
-
-do k = 1,3
-    do j = 1,N
-        do i = 1,nbead
-            p_nm(i,k,j) = 0
-            do l = 1, nbead
-                p_nm(i,k,j) = p_nm(i,k,j) + nm_matrix(i, l) * p(l,k,j)
-            end do
-        end do 
-    end do
-end do
 
 call random_number(init)
 do l = 1,nbead
@@ -198,21 +338,11 @@ do l = 1,nbead
     end do
 end do
 
-do k = 1,3
-    do j = 1,N
-        do i = 1,nbead
-            p(i,k,j) = 0
-            do l = 1, nbead
-                p(i,k,j) = p(i,k,j) + nm_matrix(l, i) * p_nm(l,k,j)
-            end do
-        end do 
-    end do
-end do
-
 end subroutine
 
-subroutine grid(q, N, nbead, n_dir, box)
-double precision, dimension(nbead, 3, N) :: q
+subroutine grid(q_nm, N, nbead, n_dir, box, nm_matrix)
+double precision, dimension(nbead, 3, N) :: q, q_nm
+double precision, dimension(nbead, nbead) :: nm_matrix
 integer :: N
 integer :: nbead
 integer n_dir
@@ -237,10 +367,13 @@ do l = 1,nbead
     end do
 end do
 
+call to_nm_fftw(q, q_nm, nbead, N)
+
 end subroutine
 
-subroutine init_coordinates(q,nbead,N)
-double precision, dimension(nbead, 3, N) :: q
+subroutine init_coordinates(q_nm, nbead, N, nm_matrix)
+double precision, dimension(nbead, 3, N) :: q, q_nm
+double precision, dimension(nbead, nbead) :: nm_matrix
 integer :: N
 integer :: nbead
 character(len = 8) :: fmt
@@ -258,6 +391,8 @@ do i = 1,nbead
     end do
     close(i + 2*nbead + 4)
 end do
+
+call to_nm_fftw(q, q_nm, nbead, N)
 
 end subroutine
 
@@ -339,15 +474,18 @@ elseif (freq_type == 'pcmd') then
 end if
 end subroutine
 
-subroutine calc_forces(q, F, N, nbead, m, interaction, parameters, parameter_number)
+subroutine calc_forces(q_nm, F, N, nbead, m, interaction, parameters, parameter_number, nm_matrix)
 implicit none
-double precision, dimension(nbead,3,N) :: q, F
+double precision, dimension(nbead,3,N) :: q, F, q_nm
+double precision, dimension(nbead, nbead) :: nm_matrix
 real, dimension(parameter_number) :: parameters
 character(len = 8) :: interaction
 integer :: N
 integer :: nbead
 integer :: parameter_number
 real :: m
+
+call from_nm_fftw(q, q_nm , nbead, N)
 
 if (interaction == 'harmonic') then
     call calc_forces_harmonic(q,F,N,nbead,m,parameters(1))
@@ -381,7 +519,7 @@ end if
 end subroutine
 
 
-subroutine do_output(q,p,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction,parameters,parameter_number)
+subroutine do_output(q_nm,p_nm,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction,parameters,parameter_number)
 double precision, dimension(nbead, 3, N) :: q, p, q_nm, p_nm, F, F_nm 
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
@@ -410,23 +548,11 @@ write(4*nbead + 5,*) N
 write(4*nbead + 5,*)
 ! write(4,*) "New frame"
 !temp = (2 * KE / (3*N))
-do y = 1,3
-    do j = 1,N
-        do z = 1,nbead
-            q_nm(z,y,j) = 0
-            p_nm(z,y,j) = 0
-            F_nm(z,y,j) = 0
-            do l = 1, nbead
-                q_nm(z,y,j) = q_nm(z,y,j) + nm_matrix(z,l) * q(l,y,j)
-                p_nm(z,y,j) = p_nm(z,y,j) + nm_matrix(z,l) * p(l,y,j)
-                F_nm(z,y,j) = F_nm(z,y,j) + nm_matrix(z,l) * F(l,y,j)
-            end do
-            q_nm(z,y,j) = q_nm(z,y,j)
-            p_nm(z,y,j) = p_nm(z,y,j)
-            F_nm(z,y,j) = F_nm(z,y,j)
-        end do 
-    end do
-end do
+
+call from_nm_fftw(q, q_nm , nbead, N)
+call from_nm_fftw(p, p_nm , nbead, N)
+call to_nm_fftw(F, F_nm , nbead, N)
+
 do k = 1,N
     do l = 1,nbead
         ! Write the positions to the output file
@@ -676,15 +802,19 @@ end subroutine
 !subroutine calc_forces_LJ()
 !end subroutine
 
-subroutine momentum_step(p,F,N,nbead,k,l,tau)
+subroutine momentum_step(p_nm,F,N,nbead,k,l,nm_matrix,tau)
 implicit none
-double precision, dimension(nbead,3,N) :: p, F
+double precision, dimension(nbead,3,N) :: p, p_nm , F
+double precision, dimension(nbead, nbead) :: nm_matrix
 integer :: N
 integer :: nbead
 integer :: k
 integer :: j
 integer :: l
 real :: tau
+
+call from_nm_fftw(p, p_nm , nbead, N)
+
 do k = 1,N
     do j = 1,3
         do l = 1,nbead
@@ -692,13 +822,14 @@ do k = 1,N
         end do 
     end do
 end do
+
+call to_nm_fftw(p, p_nm , nbead, N)
+
 end subroutine
 
-subroutine replica_step(q,p,N,nbead,nm_matrix,frequencies,nm_masses,tau,centroid_constraint)
+subroutine replica_step(q_nm,p_nm,N,nbead,frequencies,nm_masses,tau,centroid_constraint)
 implicit none
-double precision, dimension(nbead,3,N) :: q, p
 double precision, dimension(nbead,3,N) ::q_nm, p_nm
-double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
 double precision :: q_nm_temp
 double precision :: p_nm_temp
@@ -711,19 +842,6 @@ integer :: l
 real :: tau
 double precision, dimension(nbead) :: nm_masses
 character(len = 3) :: centroid_constraint
-do k = 1,3
-    do j = 1,N
-        do i = 1,nbead
-            q_nm(i,k,j) = 0
-            p_nm(i,k,j) = 0
-            do l = 1, nbead
-                q_nm(i,k,j) = q_nm(i,k,j) + nm_matrix(i, l) * q(l,k,j)
-                p_nm(i,k,j) = p_nm(i,k,j) + nm_matrix(i, l) * p(l,k,j)
-            end do
-        end do 
-    end do
-end do
-
 do k = 1,3
     do j = 1,N
         ! Centroid update
@@ -742,27 +860,12 @@ do k = 1,3
         end do 
     end do
 end do
-
-do k = 1,3
-    do j = 1,N
-        do i = 1,nbead
-            q(i,k,j) = 0
-            p(i,k,j) = 0
-            do l = 1, nbead
-                q(i,k,j) = q(i,k,j) + nm_matrix(l, i) * q_nm(l,k,j)
-                p(i,k,j) = p(i,k,j) + nm_matrix(l, i) * p_nm(l,k,j)
-            end do
-        end do 
-    end do
-end do
 end subroutine
 
-subroutine thermostat(p, temperature, gamma, scale, N, nbead, nm_masses, nm_matrix, frequencies, tau)
+subroutine thermostat(p_nm, temperature, gamma, scale, N, nbead, nm_masses, frequencies, tau)
 ! Langevin
-double precision, dimension(nbead,3,N) :: p
 double precision, dimension(nbead,3,N) :: p_nm
 double precision, dimension(nbead,3,2*N) :: init
-double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
 double precision :: KE
 real :: gamma
@@ -782,17 +885,6 @@ real(8), parameter :: PI = 4 * atan (1.0_8)
 local = .TRUE.
 
 call random_number(init)
-
-do k = 1,3
-    do j = 1,N
-        do i = 1,nbead
-            p_nm(i,k,j) = 0
-            do l = 1, nbead
-                p_nm(i,k,j) = p_nm(i,k,j) + nm_matrix(i,l) * p(l,k,j)
-            end do
-        end do 
-    end do
-end do
 
 do i = 2,nbead
     A = exp(-2 * scale * frequencies(i) * tau)
@@ -851,17 +943,6 @@ else
     end do
 
 end if
-
-do k = 1,3
-    do j = 1,N
-        do i = 1,nbead
-            p(i,k,j) = 0
-            do l = 1, nbead
-                p(i,k,j) = p(i,k,j) + nm_matrix(l, i) * p_nm(l,k,j)
-            end do
-        end do 
-    end do
-end do
 
 
 end subroutine
