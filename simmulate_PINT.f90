@@ -20,6 +20,9 @@ character(len = 9) :: buffer
 character(len = 4) :: freq_type
 character(len = 3) :: thermostating
 character(len = 3) :: centroid_constraint
+character(len = 3) :: out_pos
+character(len = 3) :: out_mom
+character(len = 3) :: out_force
 ! probly does not have to be declared ?
 open(1, file = 'input.inp', status = 'old')
 read(1,*) buffer, n_dir
@@ -38,6 +41,10 @@ read(1,*) buffer, m
 read(1,*) buffer, box
 read(1,*) buffer, target_freq
 read(1,*) buffer, stride
+read(1,*) buffer, out_pos
+read(1,*) buffer, out_mom
+read(1,*) buffer, out_force
+
 
 close(1)
 
@@ -66,12 +73,12 @@ elseif (int_type == 'McKenzie') then
 end if
 
 call run_simmulation(n_dir, N, nbead, thermostating, temperature, gamma, alpha, int_type, inp_type, freq_type, target_freq, &
- parameter_number, centroid_constraint, t, tau, m, box, stride)
+ parameter_number, centroid_constraint, t, tau, m, box, stride, out_pos, out_mom, out_force)
 
 end program
 
 subroutine run_simmulation(n_dir, N, nbead, thermostating, temperature, gamma, alpha, interaction, inp_type, &
- freq_type, target_freq, parameter_number, centroid_constraint, t, tau, m, box, stride)
+ freq_type, target_freq, parameter_number, centroid_constraint, t, tau, m, box, stride, out_pos, out_mom, out_force)
 implicit none
 integer :: N
 integer :: t
@@ -102,18 +109,33 @@ character(len = 8) :: inp_type
 character(len = 4) :: freq_type
 character(len = 3) :: thermostating
 character(len = 3) :: centroid_constraint
+character(len = 3) :: out_pos
+character(len = 3) :: out_mom
+character(len = 3) :: out_force
 real(8), parameter :: PI = 4 * atan (1.0_8)
 fmt = '(I2.2)'
-do i = 1,nbead
-    write (x,fmt) (i-1) 
-    open(2*i + 1, file = 'positions_'//trim(x)//'.xyz', status = 'new')
-    open(2*i + 2, file = 'momenta_'//trim(x)//'.xyz', status = 'new')
-    open(i + 3*nbead + 4, file = 'forces_'//trim(x)//'.xyz', status = 'new')
-end do
 
-open(2*nbead + 3, file = 'positions_centroid.xyz', status = 'new')
-open(2*nbead + 4, file = 'momenta_centroid.xyz', status = 'new')
-open(4*nbead + 5, file = 'forces_centroid.xyz', status = 'new')
+if (out_pos == 'yay') then
+    open(2*nbead + 3, file = 'positions_centroid.xyz', status = 'new')
+    do i = 1,nbead
+        write (x,fmt) (i-1) 
+        open(2*i + 1, file = 'positions_'//trim(x)//'.xyz', status = 'new')
+    end do
+end if
+if (out_mom == 'yay') then
+    open(2*nbead + 4, file = 'momenta_centroid.xyz', status = 'new')
+    do i = 1,nbead
+        write (x,fmt) (i-1)
+        open(2*i + 2, file = 'momenta_'//trim(x)//'.xyz', status = 'new')
+    end do
+end if
+if (out_force == 'yay') then
+    open(4*nbead + 5, file = 'forces_centroid.xyz', status = 'new')
+    do i = 1,nbead
+        write (x,fmt) (i-1) 
+        open(i + 3*nbead + 4, file = 'forces_'//trim(x)//'.xyz', status = 'new')
+    end do
+end if
 
 open(2, file = 'energies.dat', status = 'new')
 
@@ -148,7 +170,8 @@ Nsteps = t/tau
 do i=1,Nsteps
     write(1,*) interaction
     if (modulo((i - 1), stride) == 0) then
-        call do_output(q_nm,p_nm,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction, parameters, parameter_number)
+        call do_output(q_nm,p_nm,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction, &
+         parameters, parameter_number, out_pos, out_mom, out_force)
     end if
     if (thermostating == 'yay') then
         call thermostat(p_nm, temperature, gamma, alpha, N, nbead, nm_masses, frequencies, tau/2)
@@ -519,7 +542,8 @@ end if
 end subroutine
 
 
-subroutine do_output(q_nm,p_nm,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction,parameters,parameter_number)
+subroutine do_output(q_nm,p_nm,F,nbead,N,nm_matrix,frequencies,nm_masses,temperature,interaction, &
+parameters,parameter_number, out_pos, out_mom, out_force)
 double precision, dimension(nbead, 3, N) :: q, p, q_nm, p_nm, F, F_nm 
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
@@ -532,43 +556,59 @@ character(len = 8) :: interaction
 integer :: nbead
 integer :: N 
 integer :: l, y, z, j, k
-do l = 1,nbead
-    write(2*l + 1,*) N
-    write(2*l + 1,*)
-    write(2*l + 2,*) N
-    write(2*l + 2,*)
-    write(l + 3*nbead + 4,*) N 
-    write(l + 3*nbead + 4,*) 
-end do
-write(2*nbead + 3,*) N
-write(2*nbead + 3,*)
-write(2*nbead + 4,*) N
-write(2*nbead + 4,*)
-write(4*nbead + 5,*) N 
-write(4*nbead + 5,*)
-! write(4,*) "New frame"
-!temp = (2 * KE / (3*N))
+character(len = 3) :: out_pos
+character(len = 3) :: out_mom
+character(len = 3) :: out_force
 
-call from_nm_fftw(q, q_nm , nbead, N)
-call from_nm_fftw(p, p_nm , nbead, N)
-call to_nm_fftw(F, F_nm , nbead, N)
-
-do k = 1,N
+if (out_pos == 'yay') then
+    call from_nm_fftw(q, q_nm , nbead, N)
+    ! Write the file headers
+    write(2*nbead + 3,*) N
+    write(2*nbead + 3,*)
     do l = 1,nbead
-        ! Write the positions to the output file
-        write(2*l + 1,*) 'X', q(l,1,k), q(l,2,k), q(l,3,k)
-    
-        write(2*l + 2,*) 'X', p(l,1,k), p(l,2,k), p(l,3,k)
-
-        write(l + 3*nbead + 4,*) 'X', F(l,1,k), F(l,2,k), F(l,3,k)
-    
+        write(2*l + 1,*) N
+        write(2*l + 1,*)
     end do
-    write(2*nbead + 3,*) 'X', q_nm(1,1,k) / (nbead ** 0.5), q_nm(1,2,k) / (nbead ** 0.5), q_nm(1,3,k) / (nbead ** 0.5)
-    
-    write(2*nbead + 4,*) 'X', p_nm(1,1,k) / (nbead ** 0.5), p_nm(1,2,k) / (nbead ** 0.5), p_nm(1,3,k) / (nbead ** 0.5)
+    do k = 1,N
+        do l = 1,nbead
+            ! Write the bead positions to the output files
+            write(2*l + 1,*) 'X', q(l,1,k), q(l,2,k), q(l,3,k)
+        end do
+        ! Write the centroid positions to the output file
+        write(2*nbead + 3,*) 'X', q_nm(1,1,k) / (nbead ** 0.5), q_nm(1,2,k) / (nbead ** 0.5), q_nm(1,3,k) / (nbead ** 0.5)
+    end do
+end if
+if (out_mom == 'yay') then
+    call from_nm_fftw(p, p_nm , nbead, N)
+    write(2*nbead + 4,*) N
+    write(2*nbead + 4,*)
+    do l = 1,nbead
+        write(2*l + 2,*) N 
+        write(2*l + 2,*)
+    end do
+    do k = 1,N
+        do l = 1,nbead
+            write(2*l + 2,*) 'X', p(l,1,k), p(l,2,k), p(l,3,k)
+        end do
+        write(2*nbead + 4,*) 'X', p_nm(1,1,k) / (nbead ** 0.5), p_nm(1,2,k) / (nbead ** 0.5), p_nm(1,3,k) / (nbead ** 0.5)
+    end do
+end if
+if (out_force == 'yay') then
+    call to_nm_fftw(F, F_nm , nbead, N)
+    write(4*nbead + 5,*) N 
+    write(4*nbead + 5,*)
+    do l = 1,nbead
+        write(l + 3*nbead + 4,*) N 
+        write(l + 3*nbead + 4,*)
+    end do
+    do k = 1,N
+        do l = 1,nbead
+            write(l + 3*nbead + 4,*) 'X', F(l,1,k), F(l,2,k), F(l,3,k)
+        end do
+        write(4*nbead + 5,*) 'X', F_nm(1,1,k) / (nbead ** 0.5), F_nm(1,2,k) / (nbead ** 0.5), F_nm(1,3,k) / (nbead ** 0.5)
+    end do
+end if
 
-    write(4*nbead + 5,*) 'X', F_nm(1,1,k) / (nbead ** 0.5), F_nm(1,2,k) / (nbead ** 0.5), F_nm(1,3,k) / (nbead ** 0.5)
-end do
 call calc_KE_classical(KE_class,p_nm,nm_masses,N,nbead)
 call calc_PE_classical_auxiliary(PE_class_aux,q_nm,frequencies,nm_masses,N,nbead)
 call calc_KE(q,F,KE,N,nbead,temperature)
