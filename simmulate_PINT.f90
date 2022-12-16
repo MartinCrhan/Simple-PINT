@@ -722,16 +722,16 @@ subroutine calc_forces_McKenzie(q,F,N,nbead,m,D1,a1,D2,a2,g1,g2)
     real :: D1, a1, D2, a2, g1, g2, m
     
     !
-    ! Each "particle" represents in reality three decoupled DOFs each moving in
-    ! a 1D double well potential.
+    ! XY of particles move in a potential from https://doi.org/10.1063/1.2785186
+    ! the z component is just a confining harmonic potential
     !
     
     do i = 1,nbead
         do l = 1,N
             F(i,1,l) = - 2 * D1 * q(i,1,l) * (q(i,1,l) ** 2 - a1 ** 2) + 4 * g1 * q(i,2,l) - &
-             3 * g2 * q(i,2,l) * q(i,1,l) ** 2 - g2 * q(i,2,l) ** 2
+             3 * g2 * q(i,2,l) * q(i,1,l) ** 2 - g2 * q(i,2,l) ** 3
             F(i,2,l) = - 2 * D2 * q(i,2,l) * (q(i,2,l) ** 2 - a2 ** 2) + 4 * g1 * q(i,1,l) - &
-            3 * g2 * q(i,1,l) * q(i,2,l) ** 2 - g1 * q(i,1,l) ** 2
+            3 * g2 * q(i,1,l) * q(i,2,l) ** 2 - g2 * q(i,1,l) ** 3
             F(i,3,l) = - q(i,3,l)
         end do
     end do
@@ -750,8 +750,8 @@ subroutine calc_PE_McKenzie(q,PE,N,nbead,m,D1,a1,D2,a2,g1,g2)
     real :: D1, a1, d2, a2, g1, g2
     
     !
-    ! Each "particle" represents in reality three decoupled DOFs each moving in
-    ! a 1D double well potential.
+    ! XY of particles move in a potential from https://doi.org/10.1063/1.2785186
+    ! the z component is just a confining harmonic potential
     !
     
     PE = 0
