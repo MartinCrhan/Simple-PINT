@@ -524,6 +524,8 @@ elseif (interaction == '1Ddouble') then
     call calc_forces_1Ddouble(q,F,N,nbead,m,parameters(1),parameters(2))
 elseif (interaction ==  'McKenzie') then
     call calc_forces_McKenzie(q,F,N,nbead,m,parameters(1),parameters(2),parameters(3),parameters(4),parameters(5),parameters(6))
+elseif (interaction ==  '2D_Morse') then
+    call calc_forces_2D_Morse(q,F,N,nbead,m,parameters(1),parameters(2),parameters(3))
 end if
 
 end subroutine
@@ -545,6 +547,8 @@ elseif (interaction == '1Ddouble') then
     call calc_PE_1Ddouble(q,PE,N,nbead,m,parameters(1),parameters(2))
 elseif (interaction == 'McKenzie') then
     call calc_PE_McKenzie(q,PE,N,nbead,m,parameters(1),parameters(2),parameters(3),parameters(4),parameters(5),parameters(6))
+elseif (interaction == '2D_Morse') then
+    call calc_PE_2D_Morse(q,PE,N,nbead,m,parameters(1),parameters(2),parameters(3))
 end if
 
 end subroutine
