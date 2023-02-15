@@ -70,6 +70,10 @@ elseif (int_type == 'McKenzie') then
 
     parameter_number = 6
 
+elseif (int_type == '2D_Morse') then
+
+    parameter_number = 3
+
 end if
 
 call run_simmulation(n_dir, N, nbead, thermostating, temperature, gamma, alpha, int_type, inp_type, freq_type, target_freq, &
@@ -437,6 +441,10 @@ elseif (interaction == 'McKenzie') then
     ! D1, a1, D2, a2, G, g
     read(1,*)
     read(1,*) parameters(1), parameters(2), parameters(3), parameters(4), parameters(5), parameters(6)
+elseif (interaction == '2D_Morse') then
+    ! D, a, r0
+    read(1,*)
+    read(1,*) parameters(1), parameters(2), parameters(3)
 end if
 close(1)
 end subroutine
@@ -760,6 +768,62 @@ subroutine calc_PE_McKenzie(q,PE,N,nbead,m,D1,a1,D2,a2,g1,g2)
         do j = 1,N
             PE = PE + 0.5 * (D1 * (q(i,1,j) ** 2 - a1 ** 2) ** 2 + D2 * (q(i,2,j) ** 2 - a2 ** 2) ** 2) - &
             q(i,1,j) * q(i,2,j) * (4 * g1 - g2 * (q(i,1,j) ** 2 + q(i,2,j) ** 2)) + 0.5 * q(i,3,j) ** 2
+        end do
+    end do
+    
+    PE = PE / nbead
+    
+end subroutine
+
+subroutine calc_forces_2D_Morse(q,F,N,nbead,m,D,a,r0)
+    implicit none
+    double precision, dimension(nbead,3,N) :: q, F
+    integer :: N
+    integer :: nbead
+    integer :: i, l
+    real ::D, a, r0, m
+    
+    !
+    ! A simple Morse potential in the usual form in 2D dimensions
+    ! the z component is just a confining harmonic potential
+    !
+    
+    do i = 1,nbead
+        do l = 1,N
+            F(i,1,l) = - D * a * (q(i,1,l) / ((q(i,1,l) ** 2 + q(i,2,l) ** 2) ** 0.5)) * &
+             (1 - exp(- a * ((q(i,1,l) ** 2 + q(i,2,l) ** 2) ** 0.5 - r0))) * &
+             exp(- a * ((q(i,1,l) ** 2 + q(i,2,l) ** 2) ** 0.5 - r0))
+            F(i,2,l) = - D * a * (q(i,2,l) / ((q(i,1,l) ** 2 + q(i,2,l) ** 2) ** 0.5)) * &
+             (1 - exp(- a * ((q(i,1,l) ** 2 + q(i,2,l) ** 2) ** 0.5 - r0))) * &
+             exp(- a * ((q(i,1,l) ** 2 + q(i,2,l) ** 2) ** 0.5 - r0))
+            F(i,3,l) = - q(i,3,l)
+        end do
+    end do
+    
+    
+end subroutine
+
+subroutine calc_PE_2D_Morse(q,PE,N,nbead,m,D,a,r0)
+    implicit none
+    double precision, dimension(nbead,3,N) :: q
+    double precision :: PE
+    integer :: N 
+    integer :: nbead
+    integer :: i, j, k
+    double precision :: m
+    real :: D, a, r0
+    
+    !
+    ! A simple Morse potential in the usual form in 2D dimensions
+    ! the z component is just a confining harmonic potential
+    !
+    
+    PE = 0
+    
+    do i = 1,nbead
+        do j = 1,N
+            PE = PE + D * (1 - exp(- a * ((q(i,1,j) ** 2 + q(i,2,j) ** 2) ** 0.5 - r0))) ** 2 + &
+            0.5 * q(i,3,j) ** 2
         end do
     end do
     
