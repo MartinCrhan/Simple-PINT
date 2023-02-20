@@ -583,8 +583,9 @@ character(len = 3) :: out_pos
 character(len = 3) :: out_mom
 character(len = 3) :: out_force
 
+call from_nm_fftw(q, q_nm , nbead, N)
+
 if (out_pos == 'yay') then
-    call from_nm_fftw(q, q_nm , nbead, N)
     ! Write the file headers
     write(2*nbead + 3,*) N
     write(2*nbead + 3,*)
@@ -646,7 +647,7 @@ end if
 
 call calc_KE_classical(KE_class,p_nm,nm_masses,N,nbead)
 call calc_PE_classical_auxiliary(PE_class_aux,q_nm,frequencies,nm_masses,N,nbead)
-call calc_KE(q,F,KE,N,nbead,temperature)
+call calc_KE(q,q_nm,F,KE,N,nbead,temperature)
 call calc_PE(q,PE,N,nbead,nm_masses(1),interaction,parameters,parameter_number)
 temp = (2 * KE_class / (3 * N * nbead))
 write(2,*) KE, PE, KE + PE, temp
@@ -858,10 +859,9 @@ subroutine calc_PE_2D_Morse(q,PE,N,nbead,m,D,a,r0)
     
 end subroutine
 
-subroutine calc_KE(q,F,KE,N,nbead,temperature)
+subroutine calc_KE(q,q_nm,F,KE,N,nbead,temperature)
 implicit none
-double precision, dimension(nbead,3,N) :: q, F
-double precision, dimension(3,N) :: q_centr
+double precision, dimension(nbead,3,N) :: q, q_nm, F
 double precision :: KE
 real :: temperature
 integer :: N
@@ -870,25 +870,17 @@ integer :: i
 integer :: k
 integer :: j
 
-do i = 1,N
-    do j = 1,3
-        q_centr(j,i) = 0
-        do k = 1,nbead
-            q_centr(j,i) = q_centr(j,i) + q(k,j,i)
-        end do
-        q_centr = q_centr / nbead
-    end do
-end do
-
-KE = N * temperature / 2
+KE = 0
 
 do i = 1,N
     do j = 1,3
         do k = 1,nbead
-            KE = KE - (0.5 / nbead) * (q(k,j,i) - q_centr(j,i)) * F(k,j,i)
+            KE = KE - (0.5 / nbead) * (q(k,j,i) - (q_nm(1,j,i) * (1 / (nbead ** 0.5)))) * F(k,j,i)
         end do
     end do
 end do
+
+KE = KE + (3 / 2) * N * temperature
 
 end subroutine
 
