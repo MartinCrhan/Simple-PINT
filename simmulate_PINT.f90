@@ -880,7 +880,7 @@ do i = 1,N
     end do
 end do
 
-KE = KE + (3 / 2) * N * temperature
+KE = KE + 1.5 * N * temperature
 
 end subroutine
 
