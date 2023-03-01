@@ -104,7 +104,7 @@ double precision, dimension(nbead) :: nm_masses
 real, dimension(parameter_number) :: parameters
 double precision, dimension(nbead, 3, N) :: p, p_nm, q_nm, F
 double precision, dimension(nbead, nbead) :: nm_matrix
-double precision, dimension(nbead) :: frequencies
+double precision, dimension(nbead) :: frequencies, thermo_A, thermo_B
 double precision, dimension(2, 2, nbead) :: step_matrix
 complex (kind = 8), dimension(nbead, 3, N) :: fft_array
 integer :: i
@@ -170,7 +170,7 @@ plan_c2r = fftw_plan_dft_c2r_1d(nbead, fft_array(1:nbead, 1, 1), p(1:nbead, 1, 1
 ! Initialize nm_matrix and frequencies
 
 call init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq, m , nm_masses, &
- tau, centroid_constraint, step_matrix)
+ tau, centroid_constraint, step_matrix, gamma, alpha, thermo_A, thermo_B)
 
 ! Initialize positions
 
@@ -201,14 +201,14 @@ do i=1,Nsteps
          parameters, parameter_number, out_bead, out_pos, out_mom, out_force, plan_r2c, plan_c2r)
     end if
     if (thermostating == 'yay') then
-        call thermostat(p_nm, temperature, gamma, alpha, N, nbead, nm_masses, frequencies, tau/2)
+        call thermostat(p_nm, N, nbead, thermo_A, thermo_B)
     end if
     call momentum_step(p_nm,F,N,nbead,k,l,nm_matrix,tau/2, plan_r2c, plan_c2r)
     call replica_step(q_nm,p_nm,N,nbead,step_matrix)
     call calc_forces(q_nm,F,N,nbead,m,interaction,parameters,parameter_number, nm_matrix, plan_c2r)
     call momentum_step(p_nm,F,N,nbead,k,l,nm_matrix,tau/2, plan_r2c, plan_c2r)
     if (thermostating == 'yay') then
-        call thermostat(p_nm, temperature, gamma, alpha, N, nbead, nm_masses, frequencies, tau/2)
+        call thermostat(p_nm, N, nbead, thermo_A, thermo_B)
     end if
 end do
 
@@ -460,13 +460,15 @@ end subroutine
 
 
 subroutine init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq, &
- m, nm_masses, tau, centroid_constraint, step_matrix)
+ m, nm_masses, tau, centroid_constraint, step_matrix, gamma, scale, thermo_A, &
+  thermo_B)
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
+double precision, dimension(nbead) :: thermo_A, thermo_B
 double precision, dimension(2, 2, nbead) :: step_matrix
 integer :: nbead
 integer :: i, j
-real :: m 
+real :: m, gamma, scale
 double precision, dimension(nbead) :: nm_masses
 real :: temperature
 real :: target_freq
@@ -493,7 +495,7 @@ if (modulo(nbead, 2) == 0) then
     end do
 end if
 
-! NM frequencies, hbar = 1, k_b = 1 are used
+! Initialize NM frequencies, hbar = 1, k_b = 1 are used
 
 if (freq_type == 'rpmd') then
     ! Set to physical frequencies in rpmd case
@@ -517,6 +519,8 @@ elseif (freq_type == 'pcmd') then
     end do
 end if
 
+! Initialize the exact propagation matrix
+
 if (centroid_constraint == 'nay') then
     step_matrix(1, 1, 1) = 1
     step_matrix(1, 2, 1) = (1 / nm_masses(1)) * tau
@@ -534,6 +538,16 @@ do i = 2,nbead
     step_matrix(1, 2, i) = (1 / (nm_masses(i) * frequencies(i))) * sin(frequencies(i) * tau)
     step_matrix(2, 1, i) = - nm_masses(i) * frequencies(i) * sin(frequencies(i) * tau)
     step_matrix(2, 2, i) = cos(frequencies(i) * tau)
+end do
+
+! Initialize the PILE thermostat parameters
+
+thermo_A(1) = exp(- gamma * tau/2)
+thermo_B(1) = ((1 - thermo_A(1) ** 2) ** 0.5) * ((nm_masses(1) * temperature * nbead) ** 0.5)
+
+do i = 2,nbead
+    thermo_A(i) = exp(-2 * scale * frequencies(i) * tau/2)
+    thermo_B(i) = ((1 - thermo_A(i) ** 2) ** 0.5) * ((nm_masses(i) * temperature * nbead) ** 0.5)
 end do
 
 end subroutine
@@ -1003,87 +1017,68 @@ end do
 
 end subroutine
 
-subroutine thermostat(p_nm, temperature, gamma, scale, N, nbead, nm_masses, frequencies, tau)
+subroutine thermostat(p_nm, N, nbead, thermo_A, thermo_B)
 ! Langevin
 double precision, dimension(nbead,3,N) :: p_nm
 double precision, dimension(nbead,3,2*N) :: init
-double precision, dimension(nbead) :: frequencies
+double precision, dimension(nbead) :: thermo_A, thermo_B
 double precision :: KE
-real :: gamma
-real :: scale
-double precision, dimension(nbead) :: nm_masses
-real :: tau
-real :: temperature
 integer :: N
 integer :: nbead
-double precision :: A 
-double precision :: B
-double precision :: alpha
-double precision :: beta
-logical :: local
 real(8), parameter :: PI = 4 * atan (1.0_8)
-
-local = .TRUE.
 
 call random_number(init)
 
 do i = 2,nbead
-    A = exp(-2 * scale * frequencies(i) * tau)
-    B = (1 - A ** 2) ** 0.5
     do k = 1,N
         do j = 1,3
-            p_nm(i,j,k) = p_nm(i,j,k) * A + ((nm_masses(i) * temperature * nbead) ** 0.5) &
-             * B * ((- 2 * log(init(i,j,k))) ** 0.5) * cos(2 * PI * init(i,j, k + N))
+            p_nm(i,j,k) = p_nm(i,j,k) * thermo_A(i) + thermo_B(i) &
+             * ((- 2 * log(init(i,j,k))) ** 0.5) * cos(2 * PI * init(i,j, k + N))
         end do
     end do
 end do
 
-if (local .eqv. .TRUE.) then
-    A = exp(- gamma * tau)
-    B = (1 - A ** 2) ** 0.5
-    do k = 1,N
-        do j = 1,3
-            p_nm(1,j,k) = p_nm(1,j,k) * A + ((nm_masses(1) * temperature * nbead) ** 0.5) &
-             * B * ((- 2 * log(init(1,j,k))) ** 0.5) * cos(2 * PI * init(1,j, k + N))
-        end do
+do k = 1,N
+    do j = 1,3
+        p_nm(1,j,k) = p_nm(1,j,k) * thermo_A(1) + thermo_B(1) &
+        * ((- 2 * log(init(1,j,k))) ** 0.5) * cos(2 * PI * init(1,j, k + N))
     end do
-else
+end do
 
-    ! A global CSVR thermostat for the centroid degs of freedom. Included for completeness.
-
-    KE = 0
-
-    do k = 1,N
-        do j = 1,3
-            KE = KE + (p_nm(1,j,k) ** 2) / (2 * m)
-        end do
-    end do
-
-    A = exp(- 2 * gamma * tau)
-
-    B = 0
-
-    do k = 1,3
-        do j = 1,N
-            B = B + (((- 2 * log(init(1,j,k))) ** 0.5) * cos(2 * PI * init(1,j, k + N)) ** 2)
-        end do 
-    end do
-
-    alpha = (A + ((1 - A) * (temperature * nbead) * B / (2 * KE)) + 2 * ((- 2 * log(init(1,1,1))) ** 0.5) &
-     * cos(2 * PI * init(1,1, 1 + N)) * ((A * (nbead * temperature) * (1 - A) / (2 * KE)) ** 0.5)) ** 0.5
-
-    beta = ((- 2 * log(init(1,1,1))) ** 0.5) * cos(2 * PI * init(1,1, 1 + N)) &
-     + ((2 * KE * A / ((1 - A) * temperature * nbead)) ** 0.5)
-
-    alpha = sign(alpha, beta)
-
-    do k = 1,3
-        do j = 1,N
-            p_nm(1,k,j) = alpha * p_nm(1, k, j)
-        end do 
-    end do
-
-end if
+!    A global CSVR thermostat for the centroid degs of freedom. Included for completeness.
+!
+!    KE = 0
+!
+!    do k = 1,N
+!        do j = 1,3
+!            KE = KE + (p_nm(1,j,k) ** 2) / (2 * m)
+!        end do
+!    end do
+!
+!    A = exp(- 2 * gamma * tau)
+!
+!    B = 0
+!
+!    do k = 1,3
+!        do j = 1,N
+!            B = B + (((- 2 * log(init(1,j,k))) ** 0.5) * cos(2 * PI * init(1,j, k + N)) ** 2)
+!        end do 
+!    end do
+!
+!    alpha = (A + ((1 - A) * (temperature * nbead) * B / (2 * KE)) + 2 * ((- 2 * log(init(1,1,1))) ** 0.5) &
+!     * cos(2 * PI * init(1,1, 1 + N)) * ((A * (nbead * temperature) * (1 - A) / (2 * KE)) ** 0.5)) ** 0.5
+!
+!    beta = ((- 2 * log(init(1,1,1))) ** 0.5) * cos(2 * PI * init(1,1, 1 + N)) &
+!     + ((2 * KE * A / ((1 - A) * temperature * nbead)) ** 0.5)
+!
+!    alpha = sign(alpha, beta)
+!
+!    do k = 1,3
+!        do j = 1,N
+!            p_nm(1,k,j) = alpha * p_nm(1, k, j)
+!        end do 
+!    end do
+!
 
 
 end subroutine
