@@ -992,25 +992,6 @@ integer :: k
 integer :: j
 integer :: l
 
-!do k = 1,3
-!    do j = 1,N
-!        ! Centroid update
-!        if (centroid_constraint == 'nay') then
-!            q_nm_temp = q_nm(1,k,j)
-!            p_nm_temp = p_nm(1,k,j)
-!            q_nm(1,k,j) = (1 / nm_masses(1)) * p_nm_temp * tau + q_nm_temp
-!        end if
-!        do i = 2,nbead
-!            q_nm_temp = q_nm(i,k,j)
-!            p_nm_temp = p_nm(i,k,j)
-!            p_nm(i,k,j) = cos(frequencies(i) * tau) * p_nm_temp - nm_masses(i) * frequencies(i) &
-!             * sin(frequencies(i) * tau) * q_nm_temp
-!            q_nm(i,k,j) = (1 / (nm_masses(i) * frequencies(i))) * sin(frequencies(i) * tau) * p_nm_temp
-!            q_nm(i,k,j) = q_nm(i,k,j) + cos(frequencies(i) * tau) * q_nm_temp
-!        end do 
-!    end do
-!end do
-
 do k = 1,3
     do j = 1,N
         do i = 1,nbead
