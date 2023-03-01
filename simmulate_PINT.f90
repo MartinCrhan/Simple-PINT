@@ -105,6 +105,7 @@ real, dimension(parameter_number) :: parameters
 double precision, dimension(nbead, 3, N) :: p, p_nm, q_nm, F
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
+double precision, dimension(2, 2, nbead) :: step_matrix
 complex (kind = 8), dimension(nbead, 3, N) :: fft_array
 integer :: i
 integer :: k
@@ -168,7 +169,8 @@ plan_c2r = fftw_plan_dft_c2r_1d(nbead, fft_array(1:nbead, 1, 1), p(1:nbead, 1, 1
 
 ! Initialize nm_matrix and frequencies
 
-call init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq, m , nm_masses)
+call init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq, m , nm_masses, &
+ tau, centroid_constraint, step_matrix)
 
 ! Initialize positions
 
@@ -202,7 +204,7 @@ do i=1,Nsteps
         call thermostat(p_nm, temperature, gamma, alpha, N, nbead, nm_masses, frequencies, tau/2)
     end if
     call momentum_step(p_nm,F,N,nbead,k,l,nm_matrix,tau/2, plan_r2c, plan_c2r)
-    call replica_step(q_nm,p_nm,N,nbead,frequencies,nm_masses,tau,centroid_constraint)
+    call replica_step(q_nm,p_nm,N,nbead,step_matrix)
     call calc_forces(q_nm,F,N,nbead,m,interaction,parameters,parameter_number, nm_matrix, plan_c2r)
     call momentum_step(p_nm,F,N,nbead,k,l,nm_matrix,tau/2, plan_r2c, plan_c2r)
     if (thermostating == 'yay') then
@@ -457,9 +459,11 @@ close(1)
 end subroutine
 
 
-subroutine init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq, m, nm_masses)
+subroutine init_nm(nm_matrix, frequencies, nbead, temperature, freq_type, target_freq, &
+ m, nm_masses, tau, centroid_constraint, step_matrix)
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
+double precision, dimension(2, 2, nbead) :: step_matrix
 integer :: nbead
 integer :: i, j
 real :: m 
@@ -467,6 +471,8 @@ double precision, dimension(nbead) :: nm_masses
 real :: temperature
 real :: target_freq
 character(len = 4) :: freq_type
+character(len = 3) :: centroid_constraint
+real :: tau
 real(8), parameter :: PI = 4 * atan (1.0_8)
 
 do i = 1,nbead
@@ -510,6 +516,26 @@ elseif (freq_type == 'pcmd') then
         nm_masses(i) = m * (((2*(temperature * nbead) * sin((i - 1) * PI / nbead)) ** 2) /(target_freq ** 2))
     end do
 end if
+
+if (centroid_constraint == 'nay') then
+    step_matrix(1, 1, 1) = 1
+    step_matrix(1, 2, 1) = (1 / nm_masses(1)) * tau
+    step_matrix(2, 1, 1) = 0
+    step_matrix(2, 2, 1) = 1
+else
+    step_matrix(1, 1, 1) = 1
+    step_matrix(1, 2, 1) = 0
+    step_matrix(2, 1, 1) = 0
+    step_matrix(2, 2, 1) = 1
+end if
+
+do i = 2,nbead
+    step_matrix(1, 1, i) = cos(frequencies(i) * tau)
+    step_matrix(1, 2, i) = (1 / (nm_masses(i) * frequencies(i))) * sin(frequencies(i) * tau)
+    step_matrix(2, 1, i) = - nm_masses(i) * frequencies(i) * sin(frequencies(i) * tau)
+    step_matrix(2, 2, i) = cos(frequencies(i) * tau)
+end do
+
 end subroutine
 
 subroutine calc_forces(q_nm, F, N, nbead, m, interaction, parameters, parameter_number, nm_matrix, plan_c2r)
@@ -955,39 +981,45 @@ call to_nm_fftw(p, p_nm , nbead, N, plan_r2c)
 
 end subroutine
 
-subroutine replica_step(q_nm,p_nm,N,nbead,frequencies,nm_masses,tau,centroid_constraint)
+subroutine replica_step(q_nm,p_nm,N,nbead,step_matrix)
 implicit none
 double precision, dimension(nbead,3,N) ::q_nm, p_nm
-double precision, dimension(nbead) :: frequencies
-double precision :: q_nm_temp
-double precision :: p_nm_temp
+double precision, dimension(2, 2, nbead) :: step_matrix
 integer :: N
 integer :: nbead
 integer :: i
 integer :: k
 integer :: j
 integer :: l
-real :: tau
-double precision, dimension(nbead) :: nm_masses
-character(len = 3) :: centroid_constraint
+
+!do k = 1,3
+!    do j = 1,N
+!        ! Centroid update
+!        if (centroid_constraint == 'nay') then
+!            q_nm_temp = q_nm(1,k,j)
+!            p_nm_temp = p_nm(1,k,j)
+!            q_nm(1,k,j) = (1 / nm_masses(1)) * p_nm_temp * tau + q_nm_temp
+!        end if
+!        do i = 2,nbead
+!            q_nm_temp = q_nm(i,k,j)
+!            p_nm_temp = p_nm(i,k,j)
+!            p_nm(i,k,j) = cos(frequencies(i) * tau) * p_nm_temp - nm_masses(i) * frequencies(i) &
+!             * sin(frequencies(i) * tau) * q_nm_temp
+!            q_nm(i,k,j) = (1 / (nm_masses(i) * frequencies(i))) * sin(frequencies(i) * tau) * p_nm_temp
+!            q_nm(i,k,j) = q_nm(i,k,j) + cos(frequencies(i) * tau) * q_nm_temp
+!        end do 
+!    end do
+!end do
+
 do k = 1,3
     do j = 1,N
-        ! Centroid update
-        if (centroid_constraint == 'nay') then
-            q_nm_temp = q_nm(1,k,j)
-            p_nm_temp = p_nm(1,k,j)
-            q_nm(1,k,j) = (1 / nm_masses(1)) * p_nm_temp * tau + q_nm_temp
-        end if
-        do i = 2,nbead
-            q_nm_temp = q_nm(i,k,j)
-            p_nm_temp = p_nm(i,k,j)
-            p_nm(i,k,j) = cos(frequencies(i) * tau) * p_nm_temp - nm_masses(i) * frequencies(i) &
-             * sin(frequencies(i) * tau) * q_nm_temp
-            q_nm(i,k,j) = (1 / (nm_masses(i) * frequencies(i))) * sin(frequencies(i) * tau) * p_nm_temp
-            q_nm(i,k,j) = q_nm(i,k,j) + cos(frequencies(i) * tau) * q_nm_temp
-        end do 
+        do i = 1,nbead
+            q_nm(i, k, j) = step_matrix(1,1,i) * q_nm(i,k,j) + step_matrix(1,2,i) * p_nm(i,k,j)
+            p_nm(i, k, j) = step_matrix(2,1,i) * q_nm(i,k,j) + step_matrix(2,2,i) * p_nm(i,k,j)
+        end do
     end do
 end do
+
 end subroutine
 
 subroutine thermostat(p_nm, temperature, gamma, scale, N, nbead, nm_masses, frequencies, tau)
