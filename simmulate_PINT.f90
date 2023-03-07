@@ -999,6 +999,7 @@ subroutine replica_step(q_nm,p_nm,N,nbead,step_matrix)
 implicit none
 double precision, dimension(nbead,3,N) ::q_nm, p_nm
 double precision, dimension(2, 2, nbead) :: step_matrix
+double precision temp
 integer :: N
 integer :: nbead
 integer :: i
@@ -1009,8 +1010,9 @@ integer :: l
 do k = 1,3
     do j = 1,N
         do i = 1,nbead
+            temp = q_nm(i, k, j)
             q_nm(i, k, j) = step_matrix(1,1,i) * q_nm(i,k,j) + step_matrix(1,2,i) * p_nm(i,k,j)
-            p_nm(i, k, j) = step_matrix(2,1,i) * q_nm(i,k,j) + step_matrix(2,2,i) * p_nm(i,k,j)
+            p_nm(i, k, j) = step_matrix(2,1,i) * temp + step_matrix(2,2,i) * p_nm(i,k,j)
         end do
     end do
 end do
