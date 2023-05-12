@@ -132,13 +132,17 @@ real(8), parameter :: PI = 4 * atan (1.0_8)
 type(c_ptr) :: plan_r2c
 type(c_ptr) :: plan_c2r
 
-fmt = '(I2.2)'
-
 if (out_pos == 'yay') then
     open(2*nbead + 3, file = 'positions_centroid.xyz', status = 'new')
     if (out_bead == 'yay') then
         do i = 1,nbead
-            write (x,fmt) (i-1) 
+            if ((i-1) < 100) then
+                fmt = '(I2.2)'
+                write (x,fmt) (i-1)
+            else
+                fmt = '(I3.3)'
+                write (x,fmt) (i-1)
+            end if
             open(2*i + 1, file = 'positions_'//trim(x)//'.xyz', status = 'new')
         end do
     end if
@@ -147,7 +151,13 @@ if (out_mom == 'yay') then
     open(2*nbead + 4, file = 'momenta_centroid.xyz', status = 'new')
     if (out_bead == 'yay') then
         do i = 1,nbead
-            write (x,fmt) (i-1)
+            if ((i-1) < 100) then
+                fmt = '(I2.2)'
+                write (x,fmt) (i-1)
+            else
+                fmt = '(I3.3)'
+                write (x,fmt) (i-1)
+            end if
             open(2*i + 2, file = 'momenta_'//trim(x)//'.xyz', status = 'new')
         end do
     end if
@@ -156,7 +166,13 @@ if (out_force == 'yay') then
     open(4*nbead + 5, file = 'forces_centroid.xyz', status = 'new')
     if (out_bead == 'yay') then
         do i = 1,nbead
-            write (x,fmt) (i-1) 
+            if ((i-1) < 100) then
+                fmt = '(I2.2)'
+                write (x,fmt) (i-1)
+            else
+                fmt = '(I3.3)'
+                write (x,fmt) (i-1)
+            end if
             open(i + 3*nbead + 4, file = 'forces_'//trim(x)//'.xyz', status = 'new')
         end do
     end if
@@ -419,10 +435,15 @@ integer :: nbead
 character(len = 8) :: fmt
 character(len = 8) :: x
 character(len = 2) :: buffer
-fmt = '(I2.2)'
 
 do i = 1,nbead
-    write (x,fmt) (i-1) 
+    if ((i-1) < 100) then
+        fmt = '(I2.2)'
+        write (x,fmt) (i-1)
+    else
+        fmt = '(I3.3)'
+        write (x,fmt) (i-1)
+    end if
     open(i + 2*nbead + 4, file = 'input_'//trim(x)//'.xyz', status = 'old')
     read(i + 2*nbead + 4,*)
     read(i + 2*nbead + 4,*)
@@ -916,6 +937,7 @@ end subroutine
 subroutine calc_forces_1D_Morse(q,F,N,nbead,m,D,a,r0)
     implicit none
     double precision, dimension(nbead,3,N) :: q, F
+    double precision, parameter :: one = 1 
     integer :: N
     integer :: nbead
     integer :: i, l
@@ -928,12 +950,12 @@ subroutine calc_forces_1D_Morse(q,F,N,nbead,m,D,a,r0)
     
     do i = 1,nbead
         do l = 1,N
-            F(i,1,l) = - 2 * D * a * (1 - exp(- a * (q(i,1,l) - r0))) * &
-             exp(- a * (q(i,1,l) - r0))
-            F(i,2,l) = - 2 * D * a * (1 - exp(- a * (q(i,2,l) - r0))) * &
-             exp(- a * (q(i,2,l) - r0))
-            F(i,3,l) = - 2 * D * a * (1 - exp(- a * (q(i,3,l) - r0))) * &
-             exp(- a * (q(i,3,l) - r0))
+            F(i,1,l) = - 2 * D * a * (1 - exp(- a * (abs(q(i,1,l)) - r0))) * &
+             exp(- a * (abs(q(i,1,l)) - r0)) * sign(one, q(i,1,l))
+            F(i,2,l) = - 2 * D * a * (1 - exp(- a * (abs(q(i,2,l)) - r0))) * &
+             exp(- a * (abs(q(i,2,l)) - r0)) * sign(one, q(i,2,l))
+            F(i,3,l) = - 2 * D * a * (1 - exp(- a * (abs(q(i,3,l)) - r0))) * &
+             exp(- a * (abs(q(i,3,l)) - r0)) * sign(one, q(i,3,l))
         end do
     end do
     
@@ -958,9 +980,9 @@ subroutine calc_PE_1D_Morse(q,PE,N,nbead,m,D,a,r0)
     
     do i = 1,nbead
         do j = 1,N
-            PE = PE + D * (1 - exp(- a * (q(i,1,j) - r0))) ** 2 + &
-            D * (1 - exp(- a * (q(i,2,j) - r0))) ** 2 + &
-            D * (1 - exp(- a * (q(i,3,j) - r0))) ** 2
+            PE = PE + D * (1 - exp(- a * (abs(q(i,1,j)) - r0))) ** 2 + &
+            D * (1 - exp(- a * (abs(q(i,2,j)) - r0))) ** 2 + &
+            D * (1 - exp(- a * (abs(q(i,3,j)) - r0))) ** 2
         end do
     end do
     
