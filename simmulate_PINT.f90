@@ -379,6 +379,7 @@ real :: temperature
 integer :: nbead
 integer :: N
 integer :: i,l,k,j
+real(8), parameter :: PI = 4 * atan (1.0_8)
 
 call random_number(init)
 do l = 1,nbead
