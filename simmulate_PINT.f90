@@ -182,6 +182,8 @@ open(2, file = 'energies.dat', status = 'new')
 
 open(4*nbead + 6, file = 'energies_classical.dat', status = 'new')
 
+open(4*nbead + 7, file = 'energies_primitive.dat', status = 'new')
+
 ! Create FFTW plans
 
 plan_r2c = fftw_plan_dft_r2c_1d(nbead, p(1:nbead, 1, 1), fft_array(1:nbead, 1, 1) , FFTW_ESTIMATE)
@@ -545,7 +547,7 @@ elseif (freq_type == 'pcmd') then
 
     do i = 2,nbead
         frequencies(i) = target_freq
-        nm_masses(i) = m * (((2*(temperature * nbead) * sin((i - 1) * PI / nbead)) ** 2) /(target_freq ** 2))
+        nm_masses(i) = m * (((2 * (temperature * nbead) * sin((i - 1) * PI / nbead)) ** 2) /(target_freq ** 2))
     end do
 end if
 
@@ -643,7 +645,7 @@ use, intrinsic :: iso_c_binding
 double precision, dimension(nbead, 3, N) :: q, p, q_nm, p_nm, F, F_nm 
 double precision, dimension(nbead, nbead) :: nm_matrix
 double precision, dimension(nbead) :: frequencies
-double precision :: KE, PE, temp, KE_class, PE_class_aux
+double precision :: KE, KE_primitive, PE, temp, KE_class, PE_class_aux
 type(c_ptr) :: plan_r2c
 type(c_ptr) :: plan_c2r
 real :: temperature
@@ -724,10 +726,12 @@ end if
 call calc_KE_classical(KE_class,p_nm,nm_masses,N,nbead)
 call calc_PE_classical_auxiliary(PE_class_aux,q_nm,frequencies,nm_masses,N,nbead)
 call calc_KE(q,q_nm,F,KE,N,nbead,temperature)
+call calc_KE_primitive(q,nm_masses(1),KE_primitive,N,nbead,temperature)
 call calc_PE(q,PE,N,nbead,nm_masses(1),interaction,parameters,parameter_number)
 temp = (2 * KE_class / (3 * N * nbead))
 write(2,*) KE, PE, KE + PE, temp
 write(4*nbead+6,*) KE_class, PE_class_aux + PE*nbead, KE_class + PE_class_aux + PE*nbead
+write(4*nbead+7,*) KE_primitive, PE, KE_primitive + PE, temp
 end subroutine
 
 subroutine calc_forces_harmonic(q,F,N,nbead,m,omega)
@@ -900,7 +904,7 @@ subroutine calc_forces_2D_Morse(q,F,N,nbead,m,D,a,r0)
             F(i,2,l) =  - 2 * D * a * (q(i,2,l) / ((q(i,1,l) ** 2 + q(i,2,l) ** 2) ** 0.5)) * &
              (1 - exp(- a * ((q(i,1,l) ** 2 + q(i,2,l) ** 2) ** 0.5 - r0))) * &
              exp(- a * ((q(i,1,l) ** 2 + q(i,2,l) ** 2) ** 0.5 - r0))
-            F(i,3,l) = - q(i,3,l)
+            F(i,3,l) = - 0.01 * q(i,3,l)
         end do
     end do
     
@@ -927,7 +931,7 @@ subroutine calc_PE_2D_Morse(q,PE,N,nbead,m,D,a,r0)
     do i = 1,nbead
         do j = 1,N
             PE = PE + D * (1 - exp(- a * ((q(i,1,j) ** 2 + q(i,2,j) ** 2) ** 0.5 - r0))) ** 2 + &
-            0.5 * q(i,3,j) ** 2
+            0.5 * 0.01 * q(i,3,j) ** 2
         end do
     end do
     
@@ -1013,6 +1017,34 @@ do i = 1,N
 end do
 
 KE = KE + 1.5 * N * temperature
+
+end subroutine
+
+subroutine calc_KE_primitive(q,m,KE,N,nbead,temperature)
+implicit none
+double precision, dimension(nbead,3,N) :: q
+double precision :: KE, m
+real :: temperature
+integer :: N
+integer :: nbead
+integer :: i 
+integer :: k
+integer :: j
+
+KE = 0
+
+do i = 1,N
+        do k = 1,nbead-1
+            KE = KE - 0.5 * ((m * nbead) * (temperature ** 2)) * ((q(k + 1,1,i) - q(k,1,i)) ** 2 + &
+                    (q(k + 1,2,i) - q(k,2,i)) ** 2 +(q(k + 1,3,i) - q(k,3,i)) ** 2 )
+        end do
+
+        KE = KE - 0.5 * ((m * nbead) * (temperature ** 2)) * ((q(1,1,i) - q(nbead,1,i)) ** 2 + &
+                (q(1,2,i) - q(nbead,2,i)) ** 2 +(q(1,3,i) - q(nbead,3,i)) ** 2 )
+
+end do
+
+KE = KE + 1.5 * nbead * temperature * N
 
 end subroutine
 
